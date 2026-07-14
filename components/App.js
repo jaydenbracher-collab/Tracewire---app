@@ -1,0 +1,367 @@
+import { useState, useEffect } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { supabase } from "../lib/supabaseClient";
+
+const INK = "#1B2A41", ACCENT = "#E8622C", SLATE = "#68707B", PAPER = "#FAF9F6", PANEL = "#EFF2F5", LINE = "#D9DDE2";
+const CABLE_TYPES = ["1.5mm² Surfix", "2.5mm² Surfix", "4mm² Surfix", "6mm² Surfix", "10mm² Surfix", "CAT6 Data", "Coax"];
+
+function nextCableId(count) {
+  return `C-${String(count + 11).padStart(3, "0")}`;
+}
+
+export default function App({ user }) {
+  const [jobs, setJobs] = useState([]);
+  const [activeJob, setActiveJob] = useState(null);
+  const [cables, setCables] = useState([]);
+  const [view, setView] = useState("jobs");
+
+  useEffect(() => { loadJobs(); }, []);
+
+  async function loadJobs() {
+    const { data } = await supabase.from("jobs").select("*").order("created_at", { ascending: false });
+    setJobs(data || []);
+  }
+
+  async function loadCables(jobId) {
+    const { data } = await supabase.from("cables").select("*").eq("job_id", jobId).order("created_at");
+    setCables(data || []);
+  }
+
+  async function createJob(job) {
+    const { data, error } = await supabase.from("jobs").insert({ ...job, user_id: user.id }).select().single();
+    if (!error) {
+      await loadJobs();
+      setActiveJob(data);
+      setCables([]);
+      setView("job");
+    }
+  }
+
+  async function addCable(cable) {
+    const { error } = await supabase.from("cables").insert({ ...cable, job_id: activeJob.id });
+    if (!error) {
+      await loadCables(activeJob.id);
+      setView("job");
+    }
+  }
+
+  async function openJob(job) {
+    setActiveJob(job);
+    await loadCables(job.id);
+    setView("job");
+  }
+
+  return (
+    <div style={{ background: "#E7E5DF", minHeight: "100vh", fontFamily: "sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: PAPER }}>
+        <TopBar
+          view={view}
+          activeJob={activeJob}
+          onBack={() => setView(activeJob ? "job" : "jobs")}
+          onSignOut={() => supabase.auth.signOut().then(() => window.location.reload())}
+        />
+        {(view === "jobs" || view === "howto") && (
+          <TabBar view={view} onJobs={() => setView("jobs")} onHowTo={() => setView("howto")} />
+        )}
+        {view === "howto" && <HowItWorks />}
+        {view === "jobs" && <JobsList jobs={jobs} onOpen={openJob} onNew={() => setView("newjob")} />}
+        {view === "newjob" && <NewJobForm onCancel={() => setView("jobs")} onCreate={createJob} />}
+        {view === "job" && activeJob && (
+          <JobDetail job={activeJob} cables={cables} onScan={() => setView("scan")} onReport={() => setView("report")} />
+        )}
+        {view === "scan" && activeJob && (
+          <ScanFlow cables={cables} onCancel={() => setView("job")} onSave={addCable} />
+        )}
+        {view === "report" && activeJob && (
+          <ReportView job={activeJob} cables={cables} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TopBar({ view, activeJob, onBack, onSignOut }) {
+  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
+  const showBack = view !== "jobs" && view !== "howto";
+  return (
+    <div style={{ background: INK, color: PAPER, padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {showBack && <button onClick={onBack} style={{ background: "none", border: "none", color: PAPER, cursor: "pointer", fontSize: 18 }}>←</button>}
+        <div>
+          <p style={{ fontSize: 10, color: ACCENT, textTransform: "uppercase", letterSpacing: "0.1em", margin: 0, fontFamily: "monospace" }}>
+            {view === "jobs" ? "Cable documentation" : view === "howto" ? "Getting started" : "Job record"}
+          </p>
+          <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{title}</h1>
+        </div>
+      </div>
+      {(view === "jobs" || view === "howto") && <button onClick={onSignOut} style={{ background: "none", border: "none", color: SLATE, fontSize: 12, cursor: "pointer" }}>Sign out</button>}
+    </div>
+  );
+}
+
+function TabBar({ view, onJobs, onHowTo }) {
+  const tabStyle = (active) => ({
+    flex: 1, padding: "10px 0", textAlign: "center", fontSize: 13, fontWeight: 600, cursor: "pointer",
+    background: active ? PAPER : PANEL, color: active ? INK : SLATE, border: "none",
+    borderBottom: active ? `2px solid ${ACCENT}` : `2px solid transparent`,
+  });
+  return (
+    <div style={{ display: "flex", borderBottom: `1px solid ${LINE}` }}>
+      <button style={tabStyle(view === "jobs")} onClick={onJobs}>Jobs</button>
+      <button style={tabStyle(view === "howto")} onClick={onHowTo}>How It Works</button>
+    </div>
+  );
+}
+
+function HowItWorks() {
+  const steps = [
+    { title: "1. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
+    { title: "2. Get NFC tags ready", body: "Use any standard NFC cable tag (NTAG213 stickers or tie-tags work well). No special hardware needed — just your phone." },
+    { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
+    { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes — e.g. “buried in wall, chase noted on photo.” Mark if you took a photo." },
+    { title: "5. Watch the circuit map build", body: "Every cable you save adds itself to the job's circuit map automatically — no extra drawing required." },
+    { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
+    { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
+  ];
+  return (
+    <div style={{ padding: 16 }}>
+      {steps.map((s) => (
+        <div key={s.title} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${LINE}` }}>
+          <p style={{ fontWeight: 700, color: INK, fontSize: 14, margin: "0 0 4px" }}>{s.title}</p>
+          <p style={{ fontSize: 13, color: SLATE, margin: 0, lineHeight: 1.5 }}>{s.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function JobsList({ jobs, onOpen, onNew }) {
+  return (
+    <div style={{ padding: 16 }}>
+      <button onClick={onNew} style={{ width: "100%", padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, marginBottom: 20, cursor: "pointer" }}>
+        + New Job
+      </button>
+      {jobs.length === 0 && <p style={{ textAlign: "center", color: SLATE, fontSize: 14, padding: "40px 0" }}>No jobs yet. Start a new job to begin tagging cables on site.</p>}
+      {jobs.map((j) => (
+        <button key={j.id} onClick={() => onOpen(j)} style={{ display: "block", width: "100%", textAlign: "left", padding: 14, marginBottom: 8, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, cursor: "pointer" }}>
+          <p style={{ fontWeight: 600, color: INK, margin: 0, fontSize: 14 }}>{j.name}</p>
+          <p style={{ color: SLATE, margin: "2px 0 0", fontSize: 12 }}>{j.address}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: "block", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", color: SLATE, marginBottom: 4 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 14, color: INK, boxSizing: "border-box" };
+
+function NewJobForm({ onCancel, onCreate }) {
+  const [form, setForm] = useState({ name: "", address: "", contractor: "", reg_no: "", coc_ref: "" });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const canSave = form.name.trim() && form.address.trim();
+  return (
+    <div style={{ padding: 16 }}>
+      <Field label="Client / Site name"><input style={inputStyle} value={form.name} onChange={set("name")} placeholder="e.g. Vermeulen Residence" /></Field>
+      <Field label="Address"><input style={inputStyle} value={form.address} onChange={set("address")} placeholder="e.g. Table View, Cape Town" /></Field>
+      <Field label="Contractor name"><input style={inputStyle} value={form.contractor} onChange={set("contractor")} placeholder="e.g. Kaizer Electrical CC" /></Field>
+      <Field label="DoL registration no."><input style={inputStyle} value={form.reg_no} onChange={set("reg_no")} placeholder="e.g. DoL 4471" /></Field>
+      <Field label="Linked COC reference"><input style={inputStyle} value={form.coc_ref} onChange={set("coc_ref")} placeholder="e.g. COC-2026-01187" /></Field>
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
+        <button disabled={!canSave} onClick={() => onCreate(form)} style={{ flex: 1, padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: canSave ? 1 : 0.4 }}>Create Job</button>
+      </div>
+    </div>
+  );
+}
+
+function JobDetail({ job, cables, onScan, onReport }) {
+  const [showQr, setShowQr] = useState(false);
+  const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/j/${job.id}` : "";
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
+        <p style={{ fontSize: 12, color: SLATE, margin: 0 }}>{job.address}</p>
+        <p style={{ fontSize: 12, color: SLATE, margin: "4px 0 0" }}>{job.contractor || "No contractor set"} {job.reg_no ? `· ${job.reg_no}` : ""}</p>
+        {job.coc_ref && <p style={{ fontSize: 11, fontFamily: "monospace", color: ACCENT, margin: "4px 0 0" }}>Linked: {job.coc_ref}</p>}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={onScan} style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          Scan New Cable Tag
+        </button>
+        <button onClick={() => setShowQr(!showQr)} style={{ padding: "0 16px", background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          QR
+        </button>
+      </div>
+
+      {showQr && (
+        <div style={{ textAlign: "center", padding: 16, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 16 }}>
+          <p style={{ fontSize: 12, color: SLATE, margin: "0 0 12px" }}>
+            Stick this on the DB board. Scanning it opens this job's wiring record — no login needed.
+          </p>
+          <div style={{ background: "#fff", display: "inline-block", padding: 12, borderRadius: 6 }}>
+            <QRCodeSVG value={publicUrl} size={160} />
+          </div>
+          <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, marginTop: 10, wordBreak: "break-all" }}>{publicUrl}</p>
+          <button onClick={() => window.print()} style={{ marginTop: 10, padding: "8px 16px", background: INK, color: PAPER, border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
+            Print
+          </button>
+        </div>
+      )}
+
+      {cables.length === 0 ? (
+        <p style={{ textAlign: "center", color: SLATE, fontSize: 14, padding: "24px 0" }}>No cables logged yet.</p>
+      ) : (
+        <>
+          <CircuitMap cables={cables} />
+          <div style={{ margin: "16px 0" }}>
+            {cables.map((c) => (
+              <div key={c.id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
+                <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
+                <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
+                <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}</p>
+              </div>
+            ))}
+          </div>
+          <button onClick={onReport} style={{ width: "100%", padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+            Generate As-Built Report
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScanFlow({ cables, onCancel, onSave }) {
+  const [scanning, setScanning] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [form, setForm] = useState({ from_point: "", to_point: "", cable_type: CABLE_TYPES[1], notes: "", photo: false });
+
+  const tap = () => { setScanning(true); setTimeout(() => { setScanning(false); setScanned(true); }, 900); };
+
+  if (!scanned) {
+    return (
+      <div style={{ padding: 16, textAlign: "center", minHeight: "50vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <button onClick={tap} disabled={scanning} style={{ width: 130, height: 130, borderRadius: "50%", background: scanning ? PANEL : INK, border: "none", marginBottom: 20, cursor: "pointer" }}>
+          <span style={{ color: scanning ? ACCENT : PAPER, fontSize: 14 }}>{scanning ? "Reading…" : "Tap to Scan"}</span>
+        </button>
+        <p style={{ fontSize: 13, color: SLATE, maxWidth: 240 }}>Simulated for demo — production build reads via phone NFC (Android/Web NFC).</p>
+        <button onClick={onCancel} style={{ marginTop: 20, background: "none", border: "none", color: SLATE, fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>Cancel</button>
+      </div>
+    );
+  }
+
+  const cableId = nextCableId(cables.length);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+
+  return (
+    <div style={{ padding: 16 }}>
+      <p style={{ fontSize: 12, color: "#2E7D4F", marginBottom: 12 }}>✓ Tag read — {cableId}</p>
+      <Field label="From"><input style={inputStyle} value={form.from_point} onChange={set("from_point")} placeholder="e.g. DB Board — Circuit 4" /></Field>
+      <Field label="To"><input style={inputStyle} value={form.to_point} onChange={set("to_point")} placeholder="e.g. Kitchen Plug Circuit" /></Field>
+      <Field label="Cable type">
+        <select style={inputStyle} value={form.cable_type} onChange={set("cable_type")}>
+          {CABLE_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </Field>
+      <Field label="Notes"><textarea style={{ ...inputStyle, resize: "none" }} rows={2} value={form.notes} onChange={set("notes")} /></Field>
+      <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+        <input type="checkbox" checked={form.photo} onChange={set("photo")} /> Photo attached
+      </label>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Discard</button>
+        <button
+          disabled={!form.from_point.trim() || !form.to_point.trim()}
+          onClick={() => onSave({ cable_id: cableId, ...form })}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point ? 1 : 0.4 }}
+        >
+          Save Cable
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CircuitMap({ cables }) {
+  const rowH = 44, height = Math.max(150, cables.length * rowH + 30), dbY = height / 2;
+  return (
+    <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 8, marginBottom: 16 }}>
+      <svg width="100%" viewBox={`0 0 340 ${height}`}>
+        <rect x="10" y={dbY - 18} width="60" height="36" fill={INK} rx="3" />
+        <text x="40" y={dbY + 5} textAnchor="middle" fill={PAPER} fontFamily="monospace" fontSize="9" fontWeight="700">DB</text>
+        {cables.map((c, i) => {
+          const y = 24 + i * rowH;
+          return (
+            <g key={c.id}>
+              <path d={`M70 ${dbY} L130 ${y}`} stroke={ACCENT} strokeWidth="1.5" fill="none" />
+              <circle cx="130" cy={y} r="4" fill={PAPER} stroke={INK} strokeWidth="1.5" />
+              <text x="140" y={y - 2} fontFamily="monospace" fontSize="9" fill={INK} fontWeight="700">{c.to_point}</text>
+              <text x="140" y={y + 9} fontFamily="monospace" fontSize="8" fill={ACCENT}>{c.cable_id}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function ReportView({ job, cables }) {
+  return (
+    <div style={{ padding: 16 }}>
+      <button onClick={() => window.print()} style={{ width: "100%", padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, marginBottom: 16, cursor: "pointer" }}>
+        Print / Save as PDF
+      </button>
+      <div style={{ border: `1.5px solid ${INK}` }}>
+        <div style={{ padding: 16, borderBottom: `1.5px solid ${INK}` }}>
+          <p style={{ fontSize: 10, fontFamily: "monospace", color: ACCENT, textTransform: "uppercase", margin: 0 }}>Tracewire — Job Record</p>
+          <h2 style={{ fontSize: 18, fontWeight: 900, color: INK, margin: "2px 0" }}>As-Built Wiring Documentation</h2>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+          <TB label="Client / Site" value={`${job.name}, ${job.address}`} border />
+          <TB label="Contractor" value={job.contractor || "—"} />
+          <TB label="COC Ref" value={job.coc_ref || "—"} border top />
+          <TB label="Cables" value={`${cables.length} logged`} top />
+        </div>
+        <div style={{ padding: 16 }}>
+          <CircuitMap cables={cables} />
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr>{["ID", "From", "To", "Type"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {cables.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ padding: 6, borderBottom: `1px solid ${LINE}`, fontFamily: "monospace", color: ACCENT }}>{c.cable_id}</td>
+                  <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>{c.from_point}</td>
+                  <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>{c.to_point}</td>
+                  <td style={{ padding: 6, borderBottom: `1px solid ${LINE}`, fontFamily: "monospace", color: SLATE }}>{c.cable_type}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: 16, borderTop: `1px solid ${LINE}`, fontSize: 11, color: SLATE }}>
+          This cable log supports the diagram and photographic evidence requirements of the SANS 10142-1 test report{job.coc_ref ? ` accompanying ${job.coc_ref}` : ""}.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TB({ label, value, border, top }) {
+  return (
+    <div style={{ padding: 10, borderRight: border ? `1px solid ${LINE}` : "none", borderTop: top ? `1px solid ${LINE}` : "none" }}>
+      <p style={{ fontSize: 9, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", margin: 0 }}>{label}</p>
+      <p style={{ fontSize: 12, fontWeight: 700, color: INK, margin: "2px 0 0" }}>{value}</p>
+    </div>
+  );
+}
