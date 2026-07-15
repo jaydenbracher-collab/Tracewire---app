@@ -3,6 +3,8 @@ import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Login() {
+   const debugUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("signin"); // signin | signup
@@ -32,7 +34,9 @@ export default function Login() {
   return (
     <div style={{ maxWidth: 380, margin: "80px auto", fontFamily: "sans-serif" }}>
       <h1 style={{ fontWeight: 800 }}>Tracewire</h1>
-      <p style={{ color: "#68707B", fontSize: 14, marginBottom: 24 }}>
+            <p style={{ fontSize: 11, color: "red", wordBreak: "break-all" }}>DEBUG: {debugUrl || "MISSING"}</p>
+
+  <p style={{ color: "#68707B", fontSize: 14, marginBottom: 24 }}>
         {mode === "signin" ? "Sign in to your account" : "Create your contractor account"}
       </p>
       <form onSubmit={submit}>
