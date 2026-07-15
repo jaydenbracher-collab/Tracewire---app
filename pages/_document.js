@@ -10,6 +10,9 @@ export default function Document() {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Tracewire" />
         <meta name="theme-color" content="#1B2A41" />
+            <link rel="manifest" href="/manifest.json" />
+        <meta name="mobile-web-app-capable" content="yes" />
+
       </Head>
       <body>
         <Main />
