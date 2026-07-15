@@ -115,14 +115,15 @@ function TabBar({ view, onJobs, onHowTo }) {
 
 function HowItWorks() {
   const steps = [
-    { title: "1. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
-    { title: "2. Get NFC tags ready", body: "Use any standard NFC cable tag (NTAG213 stickers or tie-tags work well). No special hardware needed — just your phone." },
+    { title: "1. Get your Tracewire tag bag", body: "Pick one up from your local hardware store or supplier. Inside is a pamphlet with a QR code — scan it with your phone's camera to go straight to the app, no app store or typing in a link needed." },
+    { title: "2. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
     { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
     { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes — e.g. “buried in wall, chase noted on photo.” Mark if you took a photo." },
     { title: "5. Watch the circuit map build", body: "Every cable you save adds itself to the job's circuit map automatically — no extra drawing required." },
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
   ];
+
   return (
     <div style={{ padding: 16 }}>
       {steps.map((s) => (
