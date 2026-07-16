@@ -55,14 +55,21 @@ export default function PublicJobView() {
           {cables.length === 0 && <p style={{ color: SLATE, fontSize: 13 }}>No cables logged for this job yet.</p>}
 
           {cables.map((c) => (
-            <div key={c.cable_id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
-              <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
-              <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
-              <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>
-                {c.cable_type}{c.notes ? ` · ${c.notes}` : ""}{c.photo ? " · 📷" : ""}
-              </p>
-            </div>
-          ))}
+    <div key={c.cable_id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
+    <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
+    <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
+    <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>
+      {c.cable_type}{c.notes ? ` · ${c.notes}` : ""}
+    </p>
+    {c.photo_url && (
+      <img src={c.photo_url} alt="" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 4, marginTop: 6 }} />
+    )}
+    {c.audio_url && (
+      <audio controls src={c.audio_url} style={{ width: "100%", marginTop: 6, height: 34 }} />
+    )}
+  </div>
+))}
+
 
           <p style={{ fontSize: 10.5, color: SLATE, marginTop: 20, textAlign: "center" }}>
             This record is read-only. Scanned from a DB board tag — no login required.
