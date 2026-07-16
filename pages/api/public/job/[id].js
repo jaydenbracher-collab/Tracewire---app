@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
   const { data: cables } = await admin
     .from("cables")
-    .select("cable_id, from_point, to_point, cable_type, notes, photo, created_at")
+    .select("cable_id, from_point, to_point, cable_type, notes, photo, photo_url, created_at")
     .eq("job_id", id)
     .order("created_at");
 
