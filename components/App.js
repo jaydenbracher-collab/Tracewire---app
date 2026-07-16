@@ -40,6 +40,15 @@ async function uploadCablePhoto(file) {
   return data.publicUrl;
 }
 
+async function uploadCableAudio(blob) {
+  const ext = blob.type.includes("mp4") ? "m4a" : "webm";
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from("cable-notes").upload(path, blob, { contentType: blob.type || "audio/webm" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("cable-notes").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 export default function App({ user }) {
   const [jobs, setJobs] = useState([]);
   const [activeJob, setActiveJob] = useState(null);
@@ -195,7 +204,7 @@ function HowItWorks() {
     { title: "1. Get your Tracewire tag bag", body: "Pick one up from your local hardware store or supplier. Inside is a pamphlet with a QR code — scan it with your phone's camera to go straight to the app, no app store or typing in a link needed." },
     { title: "2. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
     { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
-    { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes. Add a photo if it's buried or hard to trace later." },
+    { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes. Add a photo or a quick voice note if it's easier than typing." },
     { title: "5. Watch the circuit map build", body: "Every cable you save adds itself to the job's circuit map automatically — no extra drawing required." },
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
@@ -278,6 +287,79 @@ function PhotoField({ photoUrl, onPhotoSelected, onRemove, uploading, error }) {
         style={{ display: "none" }}
         onChange={(e) => { if (e.target.files[0]) onPhotoSelected(e.target.files[0]); e.target.value = ""; }}
       />
+    </div>
+  );
+}
+
+function VoiceNoteField({ audioUrl, onRecordingComplete, onRemove, uploading, error }) {
+  const [recording, setRecording] = useState(false);
+  const [recordError, setRecordError] = useState("");
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+
+  const startRecording = async () => {
+    setRecordError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "";
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        stream.getTracks().forEach((t) => t.stop());
+        onRecordingComplete(blob);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch (err) {
+      if (err && err.name === "NotAllowedError") {
+        setRecordError("Microphone access was blocked. Allow it for this site and try again.");
+      } else {
+        setRecordError("Couldn't start recording on this device.");
+      }
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: "block", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", color: SLATE, marginBottom: 4 }}>Voice Note</label>
+
+      {audioUrl ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, background: PANEL }}>
+          <audio controls src={audioUrl} style={{ flex: 1, height: 34 }} />
+          {!uploading && (
+            <button type="button" onClick={onRemove} style={{ background: INK, color: PAPER, border: "none", borderRadius: 4, padding: "6px 10px", fontSize: 11, cursor: "pointer" }}>
+              Remove
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={recording ? stopRecording : startRecording}
+          disabled={uploading}
+          style={{
+            width: "100%", padding: 16, borderRadius: 6, fontSize: 13, cursor: uploading ? "default" : "pointer",
+            border: recording ? "none" : `1px dashed ${LINE}`,
+            background: recording ? ACCENT : PANEL,
+            color: recording ? PAPER : SLATE,
+          }}
+        >
+          {uploading ? "Uploading…" : recording ? "⏺ Recording… tap to stop" : "🎙️ Record Voice Note"}
+        </button>
+      )}
+      {(error || recordError) && <p style={{ fontSize: 12, color: ACCENT, marginTop: 6 }}>{error || recordError}</p>}
     </div>
   );
 }
@@ -386,7 +468,9 @@ function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable }) {
                 <div style={{ minWidth: 0 }}>
                   <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
                   <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
-                  <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}</p>
+                  <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>
+                    {c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}{c.audio_url ? " · 🎙️" : ""}
+                  </p>
                 </div>
               </button>
             ))}
@@ -411,6 +495,10 @@ function ScanFlow({ cables, onCancel, onSave }) {
   const [photoUrl, setPhotoUrl] = useState(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [audioPreview, setAudioPreview] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [audioUploading, setAudioUploading] = useState(false);
+  const [audioError, setAudioError] = useState("");
 
   useEffect(() => {
     setNfcSupported(typeof window !== "undefined" && "NDEFReader" in window);
@@ -477,6 +565,27 @@ function ScanFlow({ cables, onCancel, onSave }) {
     setPhotoError("");
   };
 
+  const handleRecordingComplete = async (blob) => {
+    setAudioError("");
+    setAudioPreview(URL.createObjectURL(blob));
+    setAudioUploading(true);
+    try {
+      const url = await uploadCableAudio(blob);
+      setAudioUrl(url);
+    } catch (err) {
+      setAudioError("Voice note upload failed — check your connection and try again.");
+      setAudioPreview(null);
+    } finally {
+      setAudioUploading(false);
+    }
+  };
+
+  const removeAudio = () => {
+    setAudioPreview(null);
+    setAudioUrl(null);
+    setAudioError("");
+  };
+
   if (phase === "duplicate" && duplicate) {
     return (
       <div style={{ padding: 16, textAlign: "center", minHeight: "50vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -526,6 +635,7 @@ function ScanFlow({ cables, onCancel, onSave }) {
 
   const cableId = nextCableId(cables.length);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const busy = photoUploading || audioUploading;
 
   return (
     <div style={{ padding: 16 }}>
@@ -549,14 +659,22 @@ function ScanFlow({ cables, onCancel, onSave }) {
         error={photoError}
       />
 
+      <VoiceNoteField
+        audioUrl={audioPreview}
+        onRecordingComplete={handleRecordingComplete}
+        onRemove={removeAudio}
+        uploading={audioUploading}
+        error={audioError}
+      />
+
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Discard</button>
         <button
-          disabled={!form.from_point.trim() || !form.to_point.trim() || photoUploading}
-          onClick={() => onSave({ cable_id: cableId, tag_uid: tagUid, photo_url: photoUrl, ...form })}
-          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !photoUploading ? 1 : 0.4 }}
+          disabled={!form.from_point.trim() || !form.to_point.trim() || busy}
+          onClick={() => onSave({ cable_id: cableId, tag_uid: tagUid, photo_url: photoUrl, audio_url: audioUrl, ...form })}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !busy ? 1 : 0.4 }}
         >
-          {photoUploading ? "Uploading photo…" : "Save Cable"}
+          {busy ? "Uploading…" : "Save Cable"}
         </button>
       </div>
     </div>
@@ -574,6 +692,10 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
   const [photoUrl, setPhotoUrl] = useState(cable.photo_url || null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [audioPreview, setAudioPreview] = useState(cable.audio_url || null);
+  const [audioUrl, setAudioUrl] = useState(cable.audio_url || null);
+  const [audioUploading, setAudioUploading] = useState(false);
+  const [audioError, setAudioError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -598,6 +720,29 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
     setPhotoError("");
   };
 
+  const handleRecordingComplete = async (blob) => {
+    setAudioError("");
+    setAudioPreview(URL.createObjectURL(blob));
+    setAudioUploading(true);
+    try {
+      const url = await uploadCableAudio(blob);
+      setAudioUrl(url);
+    } catch (err) {
+      setAudioError("Voice note upload failed — check your connection and try again.");
+      setAudioPreview(cable.audio_url || null);
+    } finally {
+      setAudioUploading(false);
+    }
+  };
+
+  const removeAudio = () => {
+    setAudioPreview(null);
+    setAudioUrl(null);
+    setAudioError("");
+  };
+
+  const busy = photoUploading || audioUploading;
+
   return (
     <div style={{ padding: 16 }}>
       <p style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 600, color: ACCENT, marginBottom: 12 }}>
@@ -620,14 +765,22 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
         error={photoError}
       />
 
+      <VoiceNoteField
+        audioUrl={audioPreview}
+        onRecordingComplete={handleRecordingComplete}
+        onRemove={removeAudio}
+        uploading={audioUploading}
+        error={audioError}
+      />
+
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
         <button
-          disabled={!form.from_point.trim() || !form.to_point.trim() || photoUploading}
-          onClick={() => onSave({ ...form, photo_url: photoUrl })}
-          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !photoUploading ? 1 : 0.4 }}
+          disabled={!form.from_point.trim() || !form.to_point.trim() || busy}
+          onClick={() => onSave({ ...form, photo_url: photoUrl, audio_url: audioUrl })}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !busy ? 1 : 0.4 }}
         >
-          {photoUploading ? "Uploading photo…" : "Save Changes"}
+          {busy ? "Uploading…" : "Save Changes"}
         </button>
       </div>
 
@@ -692,7 +845,7 @@ function ReportView({ job, cables }) {
           <CircuitMap cables={cables} />
           <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
             <thead>
-              <tr>{["ID", "From", "To", "Type", "Photo"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
+              <tr>{["ID", "From", "To", "Type", "Media"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {cables.map((c) => (
@@ -702,7 +855,9 @@ function ReportView({ job, cables }) {
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>{c.to_point}</td>
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}`, fontFamily: "monospace", color: SLATE }}>{c.cable_type}</td>
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>
-                    {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 3 }} /> : "—"}
+                    {c.photo_url && <img src={c.photo_url} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 3, marginRight: 4 }} />}
+                    {c.audio_url && <span title="Voice note attached">🎙️</span>}
+                    {!c.photo_url && !c.audio_url && "—"}
                   </td>
                 </tr>
               ))}
