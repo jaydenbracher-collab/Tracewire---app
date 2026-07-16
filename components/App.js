@@ -14,6 +14,7 @@ export default function App({ user }) {
   const [activeJob, setActiveJob] = useState(null);
   const [cables, setCables] = useState([]);
   const [view, setView] = useState("jobs");
+  const [editingCable, setEditingCable] = useState(null);
 
   useEffect(() => { loadJobs(); }, []);
 
@@ -51,6 +52,33 @@ export default function App({ user }) {
     setView("job");
   }
 
+  async function updateJob(jobId, updates) {
+    const { data, error } = await supabase.from("jobs").update(updates).eq("id", jobId).select().single();
+    if (!error) {
+      await loadJobs();
+      setActiveJob(data);
+      setView("job");
+    }
+  }
+
+  async function updateCable(cableId, updates) {
+    const { error } = await supabase.from("cables").update(updates).eq("id", cableId);
+    if (!error) {
+      await loadCables(activeJob.id);
+      setEditingCable(null);
+      setView("job");
+    }
+  }
+
+  async function deleteCable(cableId) {
+    const { error } = await supabase.from("cables").delete().eq("id", cableId);
+    if (!error) {
+      await loadCables(activeJob.id);
+      setEditingCable(null);
+      setView("job");
+    }
+  }
+
   return (
     <div style={{ background: "#E7E5DF", minHeight: "100vh", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: PAPER }}>
@@ -67,10 +95,28 @@ export default function App({ user }) {
         {view === "jobs" && <JobsList jobs={jobs} onOpen={openJob} onNew={() => setView("newjob")} />}
         {view === "newjob" && <NewJobForm onCancel={() => setView("jobs")} onCreate={createJob} />}
         {view === "job" && activeJob && (
-          <JobDetail job={activeJob} cables={cables} onScan={() => setView("scan")} onReport={() => setView("report")} />
+          <JobDetail
+            job={activeJob}
+            cables={cables}
+            onScan={() => setView("scan")}
+            onReport={() => setView("report")}
+            onEditJob={() => setView("editjob")}
+            onEditCable={(cable) => { setEditingCable(cable); setView("editcable"); }}
+          />
+        )}
+        {view === "editjob" && activeJob && (
+          <EditJobForm job={activeJob} onCancel={() => setView("job")} onSave={(updates) => updateJob(activeJob.id, updates)} />
         )}
         {view === "scan" && activeJob && (
           <ScanFlow cables={cables} onCancel={() => setView("job")} onSave={addCable} />
+        )}
+        {view === "editcable" && editingCable && (
+          <EditCableForm
+            cable={editingCable}
+            onCancel={() => { setEditingCable(null); setView("job"); }}
+            onSave={(updates) => updateCable(editingCable.id, updates)}
+            onDelete={() => deleteCable(editingCable.id)}
+          />
         )}
         {view === "report" && activeJob && (
           <ReportView job={activeJob} cables={cables} />
@@ -81,7 +127,7 @@ export default function App({ user }) {
 }
 
 function TopBar({ view, activeJob, onBack, onSignOut }) {
-  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
+  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "editjob" ? "Edit Job" : view === "editcable" ? "Edit Cable" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
   const showBack = view !== "jobs" && view !== "howto";
   return (
     <div style={{ background: INK, color: PAPER, padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
@@ -123,7 +169,6 @@ function HowItWorks() {
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
   ];
-
   return (
     <div style={{ padding: 16 }}>
       {steps.map((s) => (
@@ -183,14 +228,45 @@ function NewJobForm({ onCancel, onCreate }) {
   );
 }
 
-function JobDetail({ job, cables, onScan, onReport }) {
+function EditJobForm({ job, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    name: job.name || "",
+    address: job.address || "",
+    contractor: job.contractor || "",
+    reg_no: job.reg_no || "",
+    coc_ref: job.coc_ref || "",
+  });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const canSave = form.name.trim() && form.address.trim();
+  return (
+    <div style={{ padding: 16 }}>
+      <Field label="Client / Site name"><input style={inputStyle} value={form.name} onChange={set("name")} /></Field>
+      <Field label="Address"><input style={inputStyle} value={form.address} onChange={set("address")} /></Field>
+      <Field label="Contractor name"><input style={inputStyle} value={form.contractor} onChange={set("contractor")} /></Field>
+      <Field label="DoL registration no."><input style={inputStyle} value={form.reg_no} onChange={set("reg_no")} /></Field>
+      <Field label="Linked COC reference"><input style={inputStyle} value={form.coc_ref} onChange={set("coc_ref")} /></Field>
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
+        <button disabled={!canSave} onClick={() => onSave(form)} style={{ flex: 1, padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: canSave ? 1 : 0.4 }}>Save Changes</button>
+      </div>
+    </div>
+  );
+}
+
+function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable }) {
   const [showQr, setShowQr] = useState(false);
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/j/${job.id}` : "";
 
   return (
     <div style={{ padding: 16 }}>
-      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
-        <p style={{ fontSize: 12, color: SLATE, margin: 0 }}>{job.address}</p>
+      <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 12, marginBottom: 16, position: "relative" }}>
+        <button
+          onClick={onEditJob}
+          style={{ position: "absolute", top: 10, right: 10, background: "none", border: "none", color: ACCENT, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+        >
+          Edit
+        </button>
+        <p style={{ fontSize: 12, color: SLATE, margin: 0, paddingRight: 40 }}>{job.address}</p>
         <p style={{ fontSize: 12, color: SLATE, margin: "4px 0 0" }}>{job.contractor || "No contractor set"} {job.reg_no ? `· ${job.reg_no}` : ""}</p>
         {job.coc_ref && <p style={{ fontSize: 11, fontFamily: "monospace", color: ACCENT, margin: "4px 0 0" }}>Linked: {job.coc_ref}</p>}
       </div>
@@ -226,11 +302,15 @@ function JobDetail({ job, cables, onScan, onReport }) {
           <CircuitMap cables={cables} />
           <div style={{ margin: "16px 0" }}>
             {cables.map((c) => (
-              <div key={c.id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
+              <button
+                key={c.id}
+                onClick={() => onEditCable(c)}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6, background: "none", cursor: "pointer" }}
+              >
                 <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
                 <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
                 <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}</p>
-              </div>
+              </button>
             ))}
           </div>
           <button onClick={onReport} style={{ width: "100%", padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
@@ -243,7 +323,7 @@ function JobDetail({ job, cables, onScan, onReport }) {
 }
 
 function ScanFlow({ cables, onCancel, onSave }) {
-  const [phase, setPhase] = useState("idle"); // idle | scanning | scanned | duplicate
+  const [phase, setPhase] = useState("idle");
   const [nfcSupported, setNfcSupported] = useState(false);
   const [scanError, setScanError] = useState("");
   const [tagUid, setTagUid] = useState(null);
@@ -374,6 +454,61 @@ function ScanFlow({ cables, onCancel, onSave }) {
   );
 }
 
+function EditCableForm({ cable, onCancel, onSave, onDelete }) {
+  const [form, setForm] = useState({
+    from_point: cable.from_point || "",
+    to_point: cable.to_point || "",
+    cable_type: cable.cable_type || CABLE_TYPES[1],
+    notes: cable.notes || "",
+    photo: !!cable.photo,
+  });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+
+  return (
+    <div style={{ padding: 16 }}>
+      <p style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 600, color: ACCENT, marginBottom: 12 }}>
+        Editing {cable.cable_id}{cable.tag_uid ? " · 🏷️ NFC" : ""}
+      </p>
+      <Field label="From"><input style={inputStyle} value={form.from_point} onChange={set("from_point")} /></Field>
+      <Field label="To"><input style={inputStyle} value={form.to_point} onChange={set("to_point")} /></Field>
+      <Field label="Cable type">
+        <select style={inputStyle} value={form.cable_type} onChange={set("cable_type")}>
+          {CABLE_TYPES.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </Field>
+      <Field label="Notes"><textarea style={{ ...inputStyle, resize: "none" }} rows={2} value={form.notes} onChange={set("notes")} /></Field>
+      <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+        <input type="checkbox" checked={form.photo} onChange={set("photo")} /> Photo attached
+      </label>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
+        <button
+          disabled={!form.from_point.trim() || !form.to_point.trim()}
+          onClick={() => onSave(form)}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point ? 1 : 0.4 }}
+        >
+          Save Changes
+        </button>
+      </div>
+
+      {!confirmingDelete ? (
+        <button onClick={() => setConfirmingDelete(true)} style={{ width: "100%", padding: 10, background: "none", border: "none", color: "#B3261E", fontSize: 13, cursor: "pointer" }}>
+          Delete this cable
+        </button>
+      ) : (
+        <div style={{ textAlign: "center", padding: 12, background: "#FDECE6", borderRadius: 6 }}>
+          <p style={{ fontSize: 13, color: INK, marginBottom: 10 }}>Delete {cable.cable_id}? This can't be undone.</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmingDelete(false)} style={{ flex: 1, padding: 10, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Keep it</button>
+            <button onClick={onDelete} style={{ flex: 1, padding: 10, background: "#B3261E", color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CircuitMap({ cables }) {
   const rowH = 44, height = Math.max(150, cables.length * rowH + 30), dbY = height / 2;
