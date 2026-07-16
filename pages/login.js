@@ -33,10 +33,8 @@ export default function Login() {
         return;
       }
       if (data.session) {
-        // Email confirmation is off — user is signed in immediately
         router.push("/");
       } else {
-        // Email confirmation is on — no session yet, tell them to check their inbox
         setMessage("Almost there! Check your email and tap the confirmation link, then come back here to sign in.");
         setMode("signin");
         setPassword("");
@@ -82,6 +80,14 @@ export default function Login() {
       >
         {mode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
       </button>
+      {mode === "signin" && (
+        <button
+          onClick={() => router.push("/forgot-password")}
+          style={{ marginTop: 10, fontSize: 12, background: "none", border: "none", color: "#68707B", cursor: "pointer", display: "block" }}
+        >
+          Forgot password?
+        </button>
+      )}
     </div>
   );
 }
