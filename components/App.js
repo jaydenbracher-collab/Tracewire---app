@@ -229,7 +229,7 @@ function JobDetail({ job, cables, onScan, onReport }) {
               <div key={c.id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
                 <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
                 <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
-                <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}</p>
+                <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}</p>
               </div>
             ))}
           </div>
