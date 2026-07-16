@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -7,6 +7,37 @@ const CABLE_TYPES = ["1.5mm² Surfix", "2.5mm² Surfix", "4mm² Surfix", "6mm² 
 
 function nextCableId(count) {
   return `C-${String(count + 11).padStart(3, "0")}`;
+}
+
+function compressImage(file, maxWidth = 1600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Compression failed"))), "image/jpeg", quality);
+      };
+      img.onerror = () => reject(new Error("Couldn't read image"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("Couldn't read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadCablePhoto(file) {
+  const compressed = await compressImage(file);
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage.from("cable-photos").upload(path, compressed, { contentType: "image/jpeg" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("cable-photos").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export default function App({ user }) {
@@ -164,7 +195,7 @@ function HowItWorks() {
     { title: "1. Get your Tracewire tag bag", body: "Pick one up from your local hardware store or supplier. Inside is a pamphlet with a QR code — scan it with your phone's camera to go straight to the app, no app store or typing in a link needed." },
     { title: "2. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
     { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
-    { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes — e.g. “buried in wall, chase noted on photo.” Mark if you took a photo." },
+    { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes. Add a photo if it's buried or hard to trace later." },
     { title: "5. Watch the circuit map build", body: "Every cable you save adds itself to the job's circuit map automatically — no extra drawing required." },
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
@@ -208,6 +239,48 @@ function Field({ label, children }) {
 }
 
 const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${LINE}`, fontSize: 14, color: INK, boxSizing: "border-box" };
+
+function PhotoField({ photoUrl, onPhotoSelected, onRemove, uploading, error }) {
+  const inputRef = useRef(null);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: "block", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", color: SLATE, marginBottom: 4 }}>Photo</label>
+      {photoUrl ? (
+        <div style={{ position: "relative" }}>
+          <img src={photoUrl} alt="Cable" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 6, border: `1px solid ${LINE}`, display: "block" }} />
+          {!uploading && (
+            <button type="button" onClick={onRemove} style={{ position: "absolute", top: 8, right: 8, background: INK, color: PAPER, border: "none", borderRadius: 4, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>
+              Remove
+            </button>
+          )}
+          {uploading && (
+            <div style={{ position: "absolute", top: 8, right: 8, background: INK, color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 11 }}>
+              Uploading…
+            </div>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          style={{ width: "100%", padding: 16, border: `1px dashed ${LINE}`, borderRadius: 6, background: PANEL, color: SLATE, cursor: uploading ? "default" : "pointer", fontSize: 13 }}
+        >
+          {uploading ? "Uploading…" : "📷 Add Photo"}
+        </button>
+      )}
+      {error && <p style={{ fontSize: 12, color: ACCENT, marginTop: 6 }}>{error}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(e) => { if (e.target.files[0]) onPhotoSelected(e.target.files[0]); e.target.value = ""; }}
+      />
+    </div>
+  );
+}
 
 function NewJobForm({ onCancel, onCreate }) {
   const [form, setForm] = useState({ name: "", address: "", contractor: "", reg_no: "", coc_ref: "" });
@@ -305,11 +378,16 @@ function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable }) {
               <button
                 key={c.id}
                 onClick={() => onEditCable(c)}
-                style={{ display: "block", width: "100%", textAlign: "left", padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6, background: "none", cursor: "pointer" }}
+                style={{ display: "flex", gap: 10, alignItems: "center", width: "100%", textAlign: "left", padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6, background: "none", cursor: "pointer" }}
               >
-                <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
-                <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
-                <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}</p>
+                {c.photo_url && (
+                  <img src={c.photo_url} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
+                  <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
+                  <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.cable_type}{c.tag_uid ? " · 🏷️ NFC" : ""}</p>
+                </div>
               </button>
             ))}
           </div>
@@ -328,7 +406,11 @@ function ScanFlow({ cables, onCancel, onSave }) {
   const [scanError, setScanError] = useState("");
   const [tagUid, setTagUid] = useState(null);
   const [duplicate, setDuplicate] = useState(null);
-  const [form, setForm] = useState({ from_point: "", to_point: "", cable_type: CABLE_TYPES[1], notes: "", photo: false });
+  const [form, setForm] = useState({ from_point: "", to_point: "", cable_type: CABLE_TYPES[1], notes: "" });
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
 
   useEffect(() => {
     setNfcSupported(typeof window !== "undefined" && "NDEFReader" in window);
@@ -373,6 +455,27 @@ function ScanFlow({ cables, onCancel, onSave }) {
   };
 
   const enterManually = () => handleTagRead(null);
+
+  const handlePhotoSelected = async (file) => {
+    setPhotoError("");
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoUploading(true);
+    try {
+      const url = await uploadCablePhoto(file);
+      setPhotoUrl(url);
+    } catch (err) {
+      setPhotoError("Photo upload failed — check your connection and try again.");
+      setPhotoPreview(null);
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoPreview(null);
+    setPhotoUrl(null);
+    setPhotoError("");
+  };
 
   if (phase === "duplicate" && duplicate) {
     return (
@@ -422,7 +525,7 @@ function ScanFlow({ cables, onCancel, onSave }) {
   }
 
   const cableId = nextCableId(cables.length);
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   return (
     <div style={{ padding: 16 }}>
@@ -437,17 +540,23 @@ function ScanFlow({ cables, onCancel, onSave }) {
         </select>
       </Field>
       <Field label="Notes"><textarea style={{ ...inputStyle, resize: "none" }} rows={2} value={form.notes} onChange={set("notes")} /></Field>
-      <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
-        <input type="checkbox" checked={form.photo} onChange={set("photo")} /> Photo attached
-      </label>
+
+      <PhotoField
+        photoUrl={photoPreview}
+        onPhotoSelected={handlePhotoSelected}
+        onRemove={removePhoto}
+        uploading={photoUploading}
+        error={photoError}
+      />
+
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Discard</button>
         <button
-          disabled={!form.from_point.trim() || !form.to_point.trim()}
-          onClick={() => onSave({ cable_id: cableId, tag_uid: tagUid, ...form })}
-          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point ? 1 : 0.4 }}
+          disabled={!form.from_point.trim() || !form.to_point.trim() || photoUploading}
+          onClick={() => onSave({ cable_id: cableId, tag_uid: tagUid, photo_url: photoUrl, ...form })}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !photoUploading ? 1 : 0.4 }}
         >
-          Save Cable
+          {photoUploading ? "Uploading photo…" : "Save Cable"}
         </button>
       </div>
     </div>
@@ -460,10 +569,34 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
     to_point: cable.to_point || "",
     cable_type: cable.cable_type || CABLE_TYPES[1],
     notes: cable.notes || "",
-    photo: !!cable.photo,
   });
+  const [photoPreview, setPhotoPreview] = useState(cable.photo_url || null);
+  const [photoUrl, setPhotoUrl] = useState(cable.photo_url || null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const handlePhotoSelected = async (file) => {
+    setPhotoError("");
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoUploading(true);
+    try {
+      const url = await uploadCablePhoto(file);
+      setPhotoUrl(url);
+    } catch (err) {
+      setPhotoError("Photo upload failed — check your connection and try again.");
+      setPhotoPreview(cable.photo_url || null);
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoPreview(null);
+    setPhotoUrl(null);
+    setPhotoError("");
+  };
 
   return (
     <div style={{ padding: 16 }}>
@@ -478,18 +611,23 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
         </select>
       </Field>
       <Field label="Notes"><textarea style={{ ...inputStyle, resize: "none" }} rows={2} value={form.notes} onChange={set("notes")} /></Field>
-      <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
-        <input type="checkbox" checked={form.photo} onChange={set("photo")} /> Photo attached
-      </label>
+
+      <PhotoField
+        photoUrl={photoPreview}
+        onPhotoSelected={handlePhotoSelected}
+        onRemove={removePhoto}
+        uploading={photoUploading}
+        error={photoError}
+      />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
         <button
-          disabled={!form.from_point.trim() || !form.to_point.trim()}
-          onClick={() => onSave(form)}
-          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point ? 1 : 0.4 }}
+          disabled={!form.from_point.trim() || !form.to_point.trim() || photoUploading}
+          onClick={() => onSave({ ...form, photo_url: photoUrl })}
+          style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point && !photoUploading ? 1 : 0.4 }}
         >
-          Save Changes
+          {photoUploading ? "Uploading photo…" : "Save Changes"}
         </button>
       </div>
 
@@ -554,7 +692,7 @@ function ReportView({ job, cables }) {
           <CircuitMap cables={cables} />
           <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
             <thead>
-              <tr>{["ID", "From", "To", "Type"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
+              <tr>{["ID", "From", "To", "Type", "Photo"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {cables.map((c) => (
@@ -563,6 +701,9 @@ function ReportView({ job, cables }) {
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>{c.from_point}</td>
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>{c.to_point}</td>
                   <td style={{ padding: 6, borderBottom: `1px solid ${LINE}`, fontFamily: "monospace", color: SLATE }}>{c.cable_type}</td>
+                  <td style={{ padding: 6, borderBottom: `1px solid ${LINE}` }}>
+                    {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 3 }} /> : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
