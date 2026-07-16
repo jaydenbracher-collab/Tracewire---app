@@ -243,20 +243,100 @@ function JobDetail({ job, cables, onScan, onReport }) {
 }
 
 function ScanFlow({ cables, onCancel, onSave }) {
-  const [scanning, setScanning] = useState(false);
-  const [scanned, setScanned] = useState(false);
+  const [phase, setPhase] = useState("idle"); // idle | scanning | scanned | duplicate
+  const [nfcSupported, setNfcSupported] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [tagUid, setTagUid] = useState(null);
+  const [duplicate, setDuplicate] = useState(null);
   const [form, setForm] = useState({ from_point: "", to_point: "", cable_type: CABLE_TYPES[1], notes: "", photo: false });
 
-  const tap = () => { setScanning(true); setTimeout(() => { setScanning(false); setScanned(true); }, 900); };
+  useEffect(() => {
+    setNfcSupported(typeof window !== "undefined" && "NDEFReader" in window);
+  }, []);
 
-  if (!scanned) {
+  const handleTagRead = (uid) => {
+    setTagUid(uid);
+    if (uid) {
+      const match = cables.find((c) => c.tag_uid === uid);
+      if (match) {
+        setDuplicate(match);
+        setPhase("duplicate");
+        return;
+      }
+    }
+    setPhase("scanned");
+  };
+
+  const startRealScan = async () => {
+    setScanError("");
+    setPhase("scanning");
+    try {
+      const reader = new window.NDEFReader();
+      await reader.scan();
+      reader.onreading = (event) => {
+        handleTagRead(event.serialNumber || null);
+      };
+      reader.onreadingerror = () => {
+        setScanError("Couldn't read that tag. Hold your phone steady against it and try again.");
+        setPhase("idle");
+      };
+    } catch (err) {
+      if (err && err.name === "NotAllowedError") {
+        setScanError("NFC access was blocked. Allow NFC for this site in your browser settings and try again.");
+      } else if (err && err.name === "NotSupportedError") {
+        setScanError("No NFC hardware detected, or NFC is turned off on this device.");
+      } else {
+        setScanError("Couldn't start scanning. Try again.");
+      }
+      setPhase("idle");
+    }
+  };
+
+  const enterManually = () => handleTagRead(null);
+
+  if (phase === "duplicate" && duplicate) {
     return (
       <div style={{ padding: 16, textAlign: "center", minHeight: "50vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <button onClick={tap} disabled={scanning} style={{ width: 130, height: 130, borderRadius: "50%", background: scanning ? PANEL : INK, border: "none", marginBottom: 20, cursor: "pointer" }}>
-          <span style={{ color: scanning ? ACCENT : PAPER, fontSize: 14 }}>{scanning ? "Reading…" : "Tap to Scan"}</span>
+        <p style={{ fontSize: 14, color: INK, fontWeight: 600, marginBottom: 6 }}>This tag is already logged</p>
+        <p style={{ fontSize: 13, color: SLATE, marginBottom: 20 }}>
+          {duplicate.cable_id}: {duplicate.from_point} → {duplicate.to_point}
+        </p>
+        <button onClick={onCancel} style={{ padding: "10px 20px", background: INK, color: PAPER, border: "none", borderRadius: 6, cursor: "pointer" }}>
+          Back to Job
         </button>
-        <p style={{ fontSize: 13, color: SLATE, maxWidth: 240 }}>Simulated for demo — production build reads via phone NFC (Android/Web NFC).</p>
-        <button onClick={onCancel} style={{ marginTop: 20, background: "none", border: "none", color: SLATE, fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>Cancel</button>
+      </div>
+    );
+  }
+
+  if (phase !== "scanned") {
+    return (
+      <div style={{ padding: 16, textAlign: "center", minHeight: "50vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <button
+          onClick={startRealScan}
+          disabled={phase === "scanning" || !nfcSupported}
+          style={{ width: 130, height: 130, borderRadius: "50%", background: phase === "scanning" ? PANEL : INK, border: "none", marginBottom: 20, cursor: nfcSupported ? "pointer" : "not-allowed", opacity: nfcSupported ? 1 : 0.4 }}
+        >
+          <span style={{ color: phase === "scanning" ? ACCENT : PAPER, fontSize: 14 }}>
+            {phase === "scanning" ? "Reading…" : "Tap to Scan"}
+          </span>
+        </button>
+
+        {nfcSupported ? (
+          <p style={{ fontSize: 13, color: SLATE, maxWidth: 240 }}>Hold your phone against the NFC tag on the cable.</p>
+        ) : (
+          <p style={{ fontSize: 13, color: SLATE, maxWidth: 260 }}>
+            Tap-to-scan needs an NFC-enabled phone on Android Chrome. Not available on this device/browser.
+          </p>
+        )}
+
+        {scanError && <p style={{ fontSize: 12, color: ACCENT, marginTop: 10, maxWidth: 260 }}>{scanError}</p>}
+
+        <button onClick={enterManually} style={{ marginTop: 20, background: "none", border: "none", color: INK, fontSize: 13, fontWeight: 600, textDecoration: "underline", cursor: "pointer" }}>
+          Enter details manually instead
+        </button>
+        <button onClick={onCancel} style={{ marginTop: 12, background: "none", border: "none", color: SLATE, fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>
+          Cancel
+        </button>
       </div>
     );
   }
@@ -266,7 +346,9 @@ function ScanFlow({ cables, onCancel, onSave }) {
 
   return (
     <div style={{ padding: 16 }}>
-      <p style={{ fontSize: 12, color: "#2E7D4F", marginBottom: 12 }}>✓ Tag read — {cableId}</p>
+      <p style={{ fontSize: 12, color: "#2E7D4F", marginBottom: 12 }}>
+        {tagUid ? `✓ Tag read — ${cableId}` : `Manual entry — ${cableId}`}
+      </p>
       <Field label="From"><input style={inputStyle} value={form.from_point} onChange={set("from_point")} placeholder="e.g. DB Board — Circuit 4" /></Field>
       <Field label="To"><input style={inputStyle} value={form.to_point} onChange={set("to_point")} placeholder="e.g. Kitchen Plug Circuit" /></Field>
       <Field label="Cable type">
@@ -282,7 +364,7 @@ function ScanFlow({ cables, onCancel, onSave }) {
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Discard</button>
         <button
           disabled={!form.from_point.trim() || !form.to_point.trim()}
-          onClick={() => onSave({ cable_id: cableId, ...form })}
+          onClick={() => onSave({ cable_id: cableId, tag_uid: tagUid, ...form })}
           style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: form.from_point && form.to_point ? 1 : 0.4 }}
         >
           Save Cable
@@ -291,6 +373,7 @@ function ScanFlow({ cables, onCancel, onSave }) {
     </div>
   );
 }
+
 
 function CircuitMap({ cables }) {
   const rowH = 44, height = Math.max(150, cables.length * rowH + 30), dbY = height / 2;
