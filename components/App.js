@@ -49,18 +49,52 @@ async function uploadCableAudio(blob) {
   return data.publicUrl;
 }
 
+function exportCablesCSV(job, cables) {
+  const headers = ["Cable ID", "From", "To", "Type", "Notes", "NFC Tag", "Photo URL", "Voice Note URL", "Date Logged"];
+  const rows = cables.map((c) => [
+    c.cable_id,
+    c.from_point,
+    c.to_point,
+    c.cable_type,
+    c.notes || "",
+    c.tag_uid ? "Yes" : "No",
+    c.photo_url || "",
+    c.audio_url || "",
+    c.created_at ? new Date(c.created_at).toLocaleDateString() : "",
+  ]);
+  const csvContent = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(job.name || "job").replace(/[^a-z0-9]/gi, "-")}-cables.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function App({ user }) {
   const [jobs, setJobs] = useState([]);
   const [activeJob, setActiveJob] = useState(null);
   const [cables, setCables] = useState([]);
   const [view, setView] = useState("jobs");
   const [editingCable, setEditingCable] = useState(null);
+  const [stats, setStats] = useState({ totalJobs: 0, totalCables: 0 });
 
-  useEffect(() => { loadJobs(); }, []);
+  useEffect(() => { loadJobs(); loadStats(); }, []);
 
   async function loadJobs() {
     const { data } = await supabase.from("jobs").select("*").order("created_at", { ascending: false });
     setJobs(data || []);
+  }
+
+  async function loadStats() {
+    const { count: jobCount } = await supabase.from("jobs").select("*", { count: "exact", head: true });
+    const { count: cableCount } = await supabase.from("cables").select("*", { count: "exact", head: true });
+    setStats({ totalJobs: jobCount || 0, totalCables: cableCount || 0 });
   }
 
   async function loadCables(jobId) {
@@ -72,6 +106,7 @@ export default function App({ user }) {
     const { data, error } = await supabase.from("jobs").insert({ ...job, user_id: user.id }).select().single();
     if (!error) {
       await loadJobs();
+      await loadStats();
       setActiveJob(data);
       setCables([]);
       setView("job");
@@ -82,6 +117,7 @@ export default function App({ user }) {
     const { error } = await supabase.from("cables").insert({ ...cable, job_id: activeJob.id });
     if (!error) {
       await loadCables(activeJob.id);
+      await loadStats();
       setView("job");
     }
   }
@@ -114,6 +150,7 @@ export default function App({ user }) {
     const { error } = await supabase.from("cables").delete().eq("id", cableId);
     if (!error) {
       await loadCables(activeJob.id);
+      await loadStats();
       setEditingCable(null);
       setView("job");
     }
@@ -132,7 +169,7 @@ export default function App({ user }) {
           <TabBar view={view} onJobs={() => setView("jobs")} onHowTo={() => setView("howto")} />
         )}
         {view === "howto" && <HowItWorks />}
-        {view === "jobs" && <JobsList jobs={jobs} onOpen={openJob} onNew={() => setView("newjob")} />}
+        {view === "jobs" && <JobsList jobs={jobs} stats={stats} onOpen={openJob} onNew={() => setView("newjob")} />}
         {view === "newjob" && <NewJobForm onCancel={() => setView("jobs")} onCreate={createJob} />}
         {view === "job" && activeJob && (
           <JobDetail
@@ -206,7 +243,7 @@ function HowItWorks() {
     { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
     { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes. Add a photo or a quick voice note if it's easier than typing." },
     { title: "5. Watch the circuit map build", body: "Every cable you save adds itself to the job's circuit map automatically — no extra drawing required." },
-    { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report." },
+    { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report, or export the cable log as a CSV." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
   ];
   return (
@@ -221,9 +258,25 @@ function HowItWorks() {
   );
 }
 
-function JobsList({ jobs, onOpen, onNew }) {
+function StatsCard({ stats }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ flex: 1, background: INK, borderRadius: 6, padding: 14, textAlign: "center" }}>
+        <p style={{ fontSize: 24, fontWeight: 800, color: PAPER, margin: 0 }}>{stats.totalJobs}</p>
+        <p style={{ fontSize: 10, fontFamily: "monospace", color: "#B8C0CC", textTransform: "uppercase", margin: "2px 0 0" }}>Jobs</p>
+      </div>
+      <div style={{ flex: 1, background: ACCENT, borderRadius: 6, padding: 14, textAlign: "center" }}>
+        <p style={{ fontSize: 24, fontWeight: 800, color: PAPER, margin: 0 }}>{stats.totalCables}</p>
+        <p style={{ fontSize: 10, fontFamily: "monospace", color: "#FFE3D3", textTransform: "uppercase", margin: "2px 0 0" }}>Cables Logged</p>
+      </div>
+    </div>
+  );
+}
+
+function JobsList({ jobs, stats, onOpen, onNew }) {
   return (
     <div style={{ padding: 16 }}>
+      <StatsCard stats={stats} />
       <button onClick={onNew} style={{ width: "100%", padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, marginBottom: 20, cursor: "pointer" }}>
         + New Job
       </button>
@@ -475,9 +528,14 @@ function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable }) {
               </button>
             ))}
           </div>
-          <button onClick={onReport} style={{ width: "100%", padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
-            Generate As-Built Report
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onReport} style={{ flex: 1, padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+              Generate As-Built Report
+            </button>
+            <button onClick={() => exportCablesCSV(job, cables)} style={{ padding: "0 16px", background: "none", border: `1px solid ${LINE}`, color: INK, borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+              CSV
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -827,9 +885,14 @@ function CircuitMap({ cables }) {
 function ReportView({ job, cables }) {
   return (
     <div style={{ padding: 16 }}>
-      <button onClick={() => window.print()} style={{ width: "100%", padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, marginBottom: 16, cursor: "pointer" }}>
-        Print / Save as PDF
-      </button>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={() => window.print()} style={{ flex: 1, padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          Print / Save as PDF
+        </button>
+        <button onClick={() => exportCablesCSV(job, cables)} style={{ padding: "0 16px", background: "none", border: `1px solid ${LINE}`, color: INK, borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          CSV
+        </button>
+      </div>
       <div style={{ border: `1.5px solid ${INK}` }}>
         <div style={{ padding: 16, borderBottom: `1.5px solid ${INK}` }}>
           <p style={{ fontSize: 10, fontFamily: "monospace", color: ACCENT, textTransform: "uppercase", margin: 0 }}>Tracewire — Job Record</p>
