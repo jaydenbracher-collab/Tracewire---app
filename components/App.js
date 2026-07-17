@@ -49,7 +49,7 @@ async function uploadCableAudio(blob) {
   return data.publicUrl;
 }
 
-async function uploadFloorPlan(file) {
+async function uploadFloorPlanImage(file) {
   const compressed = await compressImage(file, 2000, 0.85);
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   const { error } = await supabase.storage.from("floor-plans").upload(path, compressed, { contentType: "image/jpeg" });
@@ -146,6 +146,24 @@ export default function App({ user }) {
     }
   }
 
+  async function uploadFloorPlan(url) {
+    const { data, error } = await supabase.from("jobs").update({ floor_plan_url: url }).eq("id", activeJob.id).select().single();
+    if (!error) {
+      await loadJobs();
+      setActiveJob(data);
+    }
+  }
+
+  async function placePin(cableId, x, y) {
+    const { error } = await supabase.from("cables").update({ pin_x: x, pin_y: y }).eq("id", cableId);
+    if (!error) await loadCables(activeJob.id);
+  }
+
+  async function removePin(cableId) {
+    const { error } = await supabase.from("cables").update({ pin_x: null, pin_y: null }).eq("id", cableId);
+    if (!error) await loadCables(activeJob.id);
+  }
+
   async function updateCable(cableId, updates) {
     const { error } = await supabase.from("cables").update(updates).eq("id", cableId);
     if (!error) {
@@ -163,29 +181,6 @@ export default function App({ user }) {
       setEditingCable(null);
       setView("job");
     }
-  }
-
-  async function setFloorPlan(url) {
-    const { data, error } = await supabase.from("jobs").update({ floor_plan_url: url }).eq("id", activeJob.id).select().single();
-    if (!error) {
-      await loadJobs();
-      setActiveJob(data);
-    }
-  }
-
-  async function handleUploadFloorPlan(file) {
-    const url = await uploadFloorPlan(file);
-    await setFloorPlan(url);
-  }
-
-  async function setCablePin(cableId, x, y) {
-    const { error } = await supabase.from("cables").update({ pin_x: x, pin_y: y }).eq("id", cableId);
-    if (!error) await loadCables(activeJob.id);
-  }
-
-  async function removeCablePin(cableId) {
-    const { error } = await supabase.from("cables").update({ pin_x: null, pin_y: null }).eq("id", cableId);
-    if (!error) await loadCables(activeJob.id);
   }
 
   return (
@@ -210,12 +205,21 @@ export default function App({ user }) {
             onScan={() => setView("scan")}
             onReport={() => setView("report")}
             onEditJob={() => setView("editjob")}
-            onEditCable={(cable) => { setEditingCable(cable); setView("editcable"); }}
             onFloorPlan={() => setView("floorplan")}
+            onEditCable={(cable) => { setEditingCable(cable); setView("editcable"); }}
           />
         )}
         {view === "editjob" && activeJob && (
           <EditJobForm job={activeJob} onCancel={() => setView("job")} onSave={(updates) => updateJob(activeJob.id, updates)} />
+        )}
+        {view === "floorplan" && activeJob && (
+          <FloorPlanView
+            job={activeJob}
+            cables={cables}
+            onUploadPlan={uploadFloorPlan}
+            onPlacePin={placePin}
+            onRemovePin={removePin}
+          />
         )}
         {view === "scan" && activeJob && (
           <ScanFlow cables={cables} onCancel={() => setView("job")} onSave={addCable} />
@@ -228,16 +232,6 @@ export default function App({ user }) {
             onDelete={() => deleteCable(editingCable.id)}
           />
         )}
-        {view === "floorplan" && activeJob && (
-          <FloorPlanView
-            job={activeJob}
-            cables={cables}
-            onEditCable={(cable) => { setEditingCable(cable); setView("editcable"); }}
-            onUploadFloorPlan={handleUploadFloorPlan}
-            onSetPin={setCablePin}
-            onRemovePin={removeCablePin}
-          />
-        )}
         {view === "report" && activeJob && (
           <ReportView job={activeJob} cables={cables} />
         )}
@@ -247,7 +241,7 @@ export default function App({ user }) {
 }
 
 function TopBar({ view, activeJob, onBack, onSignOut }) {
-  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "editjob" ? "Edit Job" : view === "editcable" ? "Edit Cable" : view === "scan" ? "Scan Tag" : view === "floorplan" ? "Floor Plan" : view === "report" ? "As-Built Report" : activeJob?.name;
+  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "editjob" ? "Edit Job" : view === "floorplan" ? "Floor Plan" : view === "editcable" ? "Edit Cable" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
   const showBack = view !== "jobs" && view !== "howto";
   return (
     <div style={{ background: INK, color: PAPER, padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
@@ -285,7 +279,7 @@ function HowItWorks() {
     { title: "2. Start a job", body: "Tap “+ New Job” and enter the client, address, and your details. This becomes the container for every cable you tag on that site." },
     { title: "3. Tap “Scan New Cable Tag”", body: "Open the job, tap the scan button, then hold your phone near the tag on the cable you're about to install or terminate." },
     { title: "4. Fill in the details", body: "Enter where the cable runs from and to, its type/size, and any notes. Add a photo or a quick voice note if it's easier than typing." },
-    { title: "5. Add it to the floor plan", body: "Upload a photo of the site plan once, then drop a pin for each cable so the next person can see exactly where it runs — not just what it connects to." },
+    { title: "5. Mark it on the floor plan", body: "Upload a floor plan once per job, then tap it to drop a pin showing exactly where each cable runs." },
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report, or export the cable log as a CSV." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
   ];
@@ -504,7 +498,136 @@ function EditJobForm({ job, onCancel, onSave }) {
   );
 }
 
-function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable, onFloorPlan }) {
+function FloorPlanView({ job, cables, onUploadPlan, onPlacePin, onRemovePin }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [selectedCableId, setSelectedCableId] = useState("");
+  const [selectedPin, setSelectedPin] = useState(null);
+  const inputRef = useRef(null);
+
+  const unpinned = cables.filter((c) => c.pin_x == null || c.pin_y == null);
+  const pinned = cables.filter((c) => c.pin_x != null && c.pin_y != null);
+
+  const handleFileSelected = async (file) => {
+    setUploadError("");
+    setUploading(true);
+    try {
+      const url = await uploadFloorPlanImage(file);
+      await onUploadPlan(url);
+    } catch (err) {
+      setUploadError("Upload failed — check your connection and try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleImageClick = (e) => {
+    if (!selectedCableId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    onPlacePin(selectedCableId, x, y);
+    setSelectedCableId("");
+  };
+
+  if (!job.floor_plan_url) {
+    return (
+      <div style={{ padding: 16 }}>
+        <p style={{ fontSize: 13, color: SLATE, marginBottom: 16 }}>
+          Upload a photo of the floor plan or house layout. You'll be able to tap it to mark exactly where each cable runs.
+        </p>
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          style={{ width: "100%", padding: 20, border: `1px dashed ${LINE}`, borderRadius: 6, background: PANEL, color: SLATE, cursor: uploading ? "default" : "pointer", fontSize: 14 }}
+        >
+          {uploading ? "Uploading…" : "📐 Upload Floor Plan"}
+        </button>
+        {uploadError && <p style={{ fontSize: 12, color: ACCENT, marginTop: 8 }}>{uploadError}</p>}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={(e) => { if (e.target.files[0]) handleFileSelected(e.target.files[0]); e.target.value = ""; }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      {selectedCableId && (
+        <div style={{ background: ACCENT, color: PAPER, padding: 10, borderRadius: 6, marginBottom: 10, fontSize: 13, textAlign: "center" }}>
+          Tap the plan where this cable is located
+        </div>
+      )}
+
+      <div style={{ position: "relative", marginBottom: 16, border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden" }}>
+        <img
+          src={job.floor_plan_url}
+          alt="Floor plan"
+          onClick={handleImageClick}
+          style={{ width: "100%", display: "block", cursor: selectedCableId ? "crosshair" : "default" }}
+        />
+        {pinned.map((c) => (
+          <button
+            key={c.id}
+            onClick={(e) => { e.stopPropagation(); setSelectedPin(c); }}
+            style={{
+              position: "absolute", left: `${c.pin_x}%`, top: `${c.pin_y}%`,
+              transform: "translate(-50%, -50%)", width: 22, height: 22, borderRadius: "50%",
+              background: ACCENT, border: `2px solid ${PAPER}`, color: PAPER, fontSize: 10, fontWeight: 700,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+            }}
+          >
+            •
+          </button>
+        ))}
+      </div>
+
+      {selectedPin && (
+        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
+          <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: ACCENT, margin: 0 }}>{selectedPin.cable_id}</p>
+          <p style={{ fontSize: 13, color: INK, margin: "2px 0 8px" }}>{selectedPin.from_point} → {selectedPin.to_point}</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setSelectedPin(null)} style={{ flex: 1, padding: 8, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, fontSize: 12, cursor: "pointer" }}>Close</button>
+            <button onClick={() => { onRemovePin(selectedPin.id); setSelectedPin(null); }} style={{ flex: 1, padding: 8, background: "#B3261E", color: PAPER, border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Remove Pin</button>
+          </div>
+        </div>
+      )}
+
+      {unpinned.length > 0 && (
+        <div>
+          <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 8 }}>
+            Not yet placed ({unpinned.length})
+          </p>
+          {unpinned.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedCableId(c.id)}
+              style={{
+                display: "block", width: "100%", textAlign: "left", padding: 10, marginBottom: 6, borderRadius: 6, cursor: "pointer",
+                border: selectedCableId === c.id ? `2px solid ${ACCENT}` : `1px solid ${LINE}`,
+                background: selectedCableId === c.id ? "#FDECE6" : "none",
+              }}
+            >
+              <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
+              <p style={{ fontSize: 13, color: INK, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {unpinned.length === 0 && pinned.length > 0 && (
+        <p style={{ textAlign: "center", color: SLATE, fontSize: 13 }}>Every cable has been placed on the plan.</p>
+      )}
+    </div>
+  );
+}
+
+function JobDetail({ job, cables, onScan, onReport, onEditJob, onFloorPlan, onEditCable }) {
   const [showQr, setShowQr] = useState(false);
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/j/${job.id}` : "";
 
@@ -522,18 +645,17 @@ function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable, onFl
         {job.coc_ref && <p style={{ fontSize: 11, fontFamily: "monospace", color: ACCENT, margin: "4px 0 0" }}>Linked: {job.coc_ref}</p>}
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        <button onClick={onScan} style={{ flex: 1, padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
-          Scan New Cable Tag
+      <button onClick={onScan} style={{ width: "100%", padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", marginBottom: 8 }}>
+        Scan New Cable Tag
+      </button>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setShowQr(!showQr)} style={{ flex: 1, padding: 10, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          QR Code
         </button>
-        <button onClick={() => setShowQr(!showQr)} style={{ padding: "0 16px", background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
-          QR
+        <button onClick={onFloorPlan} style={{ flex: 1, padding: 10, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>
+          Floor Plan
         </button>
       </div>
-
-      <button onClick={onFloorPlan} style={{ width: "100%", padding: 10, background: "none", border: `1px solid ${LINE}`, color: INK, borderRadius: 6, fontWeight: 600, cursor: "pointer", marginBottom: 16, fontSize: 13 }}>
-        🗺️ Floor Plan{job.floor_plan_url ? "" : " — not uploaded"}
-      </button>
 
       {showQr && (
         <div style={{ textAlign: "center", padding: 16, background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 16 }}>
@@ -584,145 +706,6 @@ function JobDetail({ job, cables, onScan, onReport, onEditJob, onEditCable, onFl
             </button>
           </div>
         </>
-      )}
-    </div>
-  );
-}
-
-function FloorPlanView({ job, cables, onEditCable, onUploadFloorPlan, onSetPin, onRemovePin }) {
-  const [placementCable, setPlacementCable] = useState(null);
-  const [selectedPin, setSelectedPin] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const inputRef = useRef(null);
-
-  const pinnedCables = cables.filter((c) => c.pin_x != null && c.pin_y != null);
-  const unpinnedCables = cables.filter((c) => c.pin_x == null || c.pin_y == null);
-
-  const handleFileSelected = async (file) => {
-    setUploadError("");
-    setUploading(true);
-    try {
-      await onUploadFloorPlan(file);
-    } catch (err) {
-      setUploadError("Upload failed — check your connection and try again.");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleMapClick = (e) => {
-    if (!placementCable) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    onSetPin(placementCable.id, x, y);
-    setPlacementCable(null);
-  };
-
-  if (!job.floor_plan_url) {
-    return (
-      <div style={{ padding: 16 }}>
-        <p style={{ fontSize: 13, color: SLATE, marginBottom: 16, lineHeight: 1.5 }}>
-          Upload a photo of the site's floor plan, then drop pins to show exactly where each cable runs — not just what it connects to.
-        </p>
-        <button
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          style={{ width: "100%", padding: 20, border: `1px dashed ${LINE}`, borderRadius: 6, background: PANEL, color: SLATE, cursor: uploading ? "default" : "pointer", fontSize: 14 }}
-        >
-          {uploading ? "Uploading…" : "🗺️ Upload Floor Plan"}
-        </button>
-        {uploadError && <p style={{ fontSize: 12, color: ACCENT, marginTop: 8 }}>{uploadError}</p>}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          style={{ display: "none" }}
-          onChange={(e) => { if (e.target.files[0]) handleFileSelected(e.target.files[0]); e.target.value = ""; }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: 16 }}>
-      {placementCable && (
-        <div style={{ background: ACCENT, color: PAPER, padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Tap the plan to place {placementCable.cable_id}</span>
-          <button onClick={() => setPlacementCable(null)} style={{ background: "none", border: "none", color: PAPER, fontWeight: 700, cursor: "pointer" }}>✕</button>
-        </div>
-      )}
-
-      <div
-        onClick={handleMapClick}
-        style={{ position: "relative", width: "100%", borderRadius: 6, overflow: "hidden", border: `1px solid ${LINE}`, cursor: placementCable ? "crosshair" : "default", marginBottom: 12 }}
-      >
-        <img src={job.floor_plan_url} alt="Floor plan" style={{ width: "100%", display: "block" }} />
-        {pinnedCables.map((c) => (
-          <div
-            key={c.id}
-            onClick={(e) => { e.stopPropagation(); setSelectedPin(c); }}
-            style={{
-              position: "absolute", left: `${c.pin_x}%`, top: `${c.pin_y}%`, transform: "translate(-50%, -50%)",
-              width: 26, height: 26, borderRadius: "50%", background: ACCENT, border: `2px solid ${PAPER}`,
-              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-            }}
-          >
-            <span style={{ fontSize: 9, fontWeight: 700, color: PAPER, fontFamily: "monospace" }}>{c.cable_id.replace("C-", "")}</span>
-          </div>
-        ))}
-      </div>
-
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={uploading}
-        style={{ width: "100%", padding: 8, background: "none", border: `1px solid ${LINE}`, color: SLATE, borderRadius: 6, fontSize: 12, cursor: "pointer", marginBottom: 16 }}
-      >
-        {uploading ? "Uploading…" : "Replace Floor Plan"}
-      </button>
-      {uploadError && <p style={{ fontSize: 12, color: ACCENT, marginTop: -8, marginBottom: 12 }}>{uploadError}</p>}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        style={{ display: "none" }}
-        onChange={(e) => { if (e.target.files[0]) handleFileSelected(e.target.files[0]); e.target.value = ""; }}
-      />
-
-      {selectedPin && (
-        <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
-          <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: ACCENT, margin: 0 }}>{selectedPin.cable_id}</p>
-          <p style={{ fontSize: 13, color: INK, margin: "2px 0 10px" }}>{selectedPin.from_point} → {selectedPin.to_point}</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => onEditCable(selectedPin)} style={{ flex: 1, padding: 8, background: INK, color: PAPER, border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Edit Cable</button>
-            <button onClick={() => { setPlacementCable(selectedPin); setSelectedPin(null); }} style={{ flex: 1, padding: 8, background: "none", border: `1px solid ${LINE}`, color: INK, borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Move Pin</button>
-            <button onClick={() => { onRemovePin(selectedPin.id); setSelectedPin(null); }} style={{ flex: 1, padding: 8, background: "none", border: `1px solid ${LINE}`, color: "#B3261E", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Remove</button>
-          </div>
-          <button onClick={() => setSelectedPin(null)} style={{ width: "100%", marginTop: 8, background: "none", border: "none", color: SLATE, fontSize: 12, cursor: "pointer" }}>Close</button>
-        </div>
-      )}
-
-      {unpinnedCables.length > 0 && !placementCable && (
-        <div>
-          <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 8 }}>
-            Not yet on the plan ({unpinnedCables.length})
-          </p>
-          {unpinnedCables.map((c) => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
-              <div>
-                <p style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: ACCENT, margin: 0 }}>{c.cable_id}</p>
-                <p style={{ fontSize: 12, color: SLATE, margin: "2px 0 0" }}>{c.from_point} → {c.to_point}</p>
-              </div>
-              <button onClick={() => setPlacementCable(c)} style={{ padding: "6px 12px", background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
-                Place
-              </button>
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -990,7 +973,7 @@ function EditCableForm({ cable, onCancel, onSave, onDelete }) {
   return (
     <div style={{ padding: 16 }}>
       <p style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 600, color: ACCENT, marginBottom: 12 }}>
-        Editing {cable.cable_id}{cable.tag_uid ? " · 🏷️ NFC" : ""}{cable.pin_x != null ? " · 📍 On plan" : ""}
+        Editing {cable.cable_id}{cable.tag_uid ? " · 🏷️ NFC" : ""}
       </p>
       <Field label="From"><input style={inputStyle} value={form.from_point} onChange={set("from_point")} /></Field>
       <Field label="To"><input style={inputStyle} value={form.to_point} onChange={set("to_point")} /></Field>
@@ -1069,7 +1052,6 @@ function CircuitMap({ cables }) {
 }
 
 function ReportView({ job, cables }) {
-  const pinnedCables = cables.filter((c) => c.pin_x != null && c.pin_y != null);
   return (
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -1092,26 +1074,22 @@ function ReportView({ job, cables }) {
           <TB label="Cables" value={`${cables.length} logged`} top />
         </div>
         <div style={{ padding: 16 }}>
-          <CircuitMap cables={cables} />
-
           {job.floor_plan_url && (
-            <div style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 8 }}>Floor Plan</p>
-              <div style={{ position: "relative", width: "100%", border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden" }}>
-                <img src={job.floor_plan_url} alt="Floor plan" style={{ width: "100%", display: "block" }} />
-                {pinnedCables.map((c) => (
-                  <div key={c.id} style={{
-                    position: "absolute", left: `${c.pin_x}%`, top: `${c.pin_y}%`, transform: "translate(-50%, -50%)",
-                    width: 20, height: 20, borderRadius: "50%", background: ACCENT, border: `2px solid ${PAPER}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    <span style={{ fontSize: 7, fontWeight: 700, color: PAPER, fontFamily: "monospace" }}>{c.cable_id.replace("C-", "")}</span>
-                  </div>
-                ))}
-              </div>
+            <div style={{ position: "relative", marginBottom: 16, border: `1px solid ${LINE}`, borderRadius: 6, overflow: "hidden" }}>
+              <img src={job.floor_plan_url} alt="Floor plan" style={{ width: "100%", display: "block" }} />
+              {cables.filter((c) => c.pin_x != null && c.pin_y != null).map((c) => (
+                <div
+                  key={c.id}
+                  style={{
+                    position: "absolute", left: `${c.pin_x}%`, top: `${c.pin_y}%`,
+                    transform: "translate(-50%, -50%)", width: 18, height: 18, borderRadius: "50%",
+                    background: ACCENT, border: `2px solid ${PAPER}`,
+                  }}
+                />
+              ))}
             </div>
           )}
-
+          <CircuitMap cables={cables} />
           <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
             <thead>
               <tr>{["ID", "From", "To", "Type", "Media"].map((h) => <th key={h} style={{ background: INK, color: PAPER, textAlign: "left", padding: 6, fontSize: 9 }}>{h}</th>)}</tr>
