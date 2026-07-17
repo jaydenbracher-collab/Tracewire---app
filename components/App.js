@@ -204,13 +204,27 @@ export default function App({ user }) {
     }
   }
 
+  function goBack() {
+    if (view === "newjob") {
+      setView("jobs");
+    } else if (["scan", "editcable", "editjob", "floorplan", "report"].includes(view)) {
+      setView("job");
+    } else if (view === "job") {
+      setActiveJob(null);
+      setCables([]);
+      setView("jobs");
+    } else {
+      setView("jobs");
+    }
+  }
+
   return (
     <div style={{ background: "#E7E5DF", minHeight: "100vh", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: PAPER }}>
         <TopBar
           view={view}
           activeJob={activeJob}
-          onBack={() => setView(activeJob ? "job" : "jobs")}
+          onBack={goBack}
           onSignOut={() => supabase.auth.signOut().then(() => window.location.reload())}
         />
         {(view === "jobs" || view === "howto") && (
