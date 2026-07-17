@@ -146,10 +146,31 @@ export default function App({ user }) {
     }
   }
 
+  async function deleteJob(jobId) {
+    const { error } = await supabase.from("jobs").delete().eq("id", jobId);
+    if (!error) {
+      await loadJobs();
+      await loadStats();
+      setActiveJob(null);
+      setCables([]);
+      setView("jobs");
+    }
+  }
+
   async function uploadFloorPlan(url) {
     const { data, error } = await supabase.from("jobs").update({ floor_plan_url: url }).eq("id", activeJob.id).select().single();
     if (!error) {
       await loadJobs();
+      setActiveJob(data);
+    }
+  }
+
+  async function removeFloorPlan() {
+    const { data, error } = await supabase.from("jobs").update({ floor_plan_url: null }).eq("id", activeJob.id).select().single();
+    if (!error) {
+      await supabase.from("cables").update({ pin_x: null, pin_y: null }).eq("job_id", activeJob.id);
+      await loadJobs();
+      await loadCables(activeJob.id);
       setActiveJob(data);
     }
   }
@@ -210,13 +231,20 @@ export default function App({ user }) {
           />
         )}
         {view === "editjob" && activeJob && (
-          <EditJobForm job={activeJob} onCancel={() => setView("job")} onSave={(updates) => updateJob(activeJob.id, updates)} />
+          <EditJobForm
+            job={activeJob}
+            cableCount={cables.length}
+            onCancel={() => setView("job")}
+            onSave={(updates) => updateJob(activeJob.id, updates)}
+            onDelete={() => deleteJob(activeJob.id)}
+          />
         )}
         {view === "floorplan" && activeJob && (
           <FloorPlanView
             job={activeJob}
             cables={cables}
             onUploadPlan={uploadFloorPlan}
+            onRemovePlan={removeFloorPlan}
             onPlacePin={placePin}
             onRemovePin={removePin}
           />
@@ -473,7 +501,7 @@ function NewJobForm({ onCancel, onCreate }) {
   );
 }
 
-function EditJobForm({ job, onCancel, onSave }) {
+function EditJobForm({ job, cableCount, onCancel, onSave, onDelete }) {
   const [form, setForm] = useState({
     name: job.name || "",
     address: job.address || "",
@@ -481,6 +509,7 @@ function EditJobForm({ job, onCancel, onSave }) {
     reg_no: job.reg_no || "",
     coc_ref: job.coc_ref || "",
   });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const canSave = form.name.trim() && form.address.trim();
   return (
@@ -490,19 +519,36 @@ function EditJobForm({ job, onCancel, onSave }) {
       <Field label="Contractor name"><input style={inputStyle} value={form.contractor} onChange={set("contractor")} /></Field>
       <Field label="DoL registration no."><input style={inputStyle} value={form.reg_no} onChange={set("reg_no")} /></Field>
       <Field label="Linked COC reference"><input style={inputStyle} value={form.coc_ref} onChange={set("coc_ref")} /></Field>
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 12 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: 12, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Cancel</button>
         <button disabled={!canSave} onClick={() => onSave(form)} style={{ flex: 1, padding: 12, background: INK, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: canSave ? 1 : 0.4 }}>Save Changes</button>
       </div>
+
+      {!confirmingDelete ? (
+        <button onClick={() => setConfirmingDelete(true)} style={{ width: "100%", padding: 10, background: "none", border: "none", color: "#B3261E", fontSize: 13, cursor: "pointer" }}>
+          Delete this job
+        </button>
+      ) : (
+        <div style={{ textAlign: "center", padding: 12, background: "#FDECE6", borderRadius: 6 }}>
+          <p style={{ fontSize: 13, color: INK, marginBottom: 10 }}>
+            Delete “{job.name}” and its {cableCount} logged cable{cableCount === 1 ? "" : "s"}? This can't be undone.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmingDelete(false)} style={{ flex: 1, padding: 10, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, cursor: "pointer" }}>Keep it</button>
+            <button onClick={onDelete} style={{ flex: 1, padding: 10, background: "#B3261E", color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>Delete Job</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function FloorPlanView({ job, cables, onUploadPlan, onPlacePin, onRemovePin }) {
+function FloorPlanView({ job, cables, onUploadPlan, onRemovePlan, onPlacePin, onRemovePin }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [selectedCableId, setSelectedCableId] = useState("");
   const [selectedPin, setSelectedPin] = useState(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const inputRef = useRef(null);
 
   const unpinned = cables.filter((c) => c.pin_x == null || c.pin_y == null);
@@ -558,6 +604,22 @@ function FloorPlanView({ job, cables, onUploadPlan, onPlacePin, onRemovePin }) {
 
   return (
     <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button onClick={() => setConfirmingRemove(true)} style={{ background: "none", border: "none", color: "#B3261E", fontSize: 12, cursor: "pointer" }}>
+          Remove Floor Plan
+        </button>
+      </div>
+
+      {confirmingRemove && (
+        <div style={{ background: "#FDECE6", borderRadius: 6, padding: 12, marginBottom: 12, textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: INK, marginBottom: 10 }}>Remove this floor plan? Any pins placed on it will be cleared too.</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmingRemove(false)} style={{ flex: 1, padding: 8, border: `1px solid ${LINE}`, background: "none", borderRadius: 6, color: SLATE, fontSize: 12, cursor: "pointer" }}>Keep it</button>
+            <button onClick={onRemovePlan} style={{ flex: 1, padding: 8, background: "#B3261E", color: PAPER, border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Remove</button>
+          </div>
+        </div>
+      )}
+
       {selectedCableId && (
         <div style={{ background: ACCENT, color: PAPER, padding: 10, borderRadius: 6, marginBottom: 10, fontSize: 13, textAlign: "center" }}>
           Tap the plan where this cable is located
