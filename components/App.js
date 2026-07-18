@@ -634,12 +634,12 @@ function VoiceNoteField({ audioUrl, onRecordingComplete, onRemove, uploading, er
 function NewJobForm({ onCancel, onCreate }) {
   const [form, setForm] = useState({ name: "", address: "", contractor: "", reg_no: "", coc_ref: "" });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const canSave = form.name.trim() && form.address.trim();
+  const canSave = form.name.trim() && form.address.trim() && form.contractor.trim();
   return (
     <div style={{ padding: 16 }}>
-      <Field label="Client / Site name"><input style={inputStyle} value={form.name} onChange={set("name")} placeholder="e.g. Vermeulen Residence" /></Field>
-      <Field label="Address"><input style={inputStyle} value={form.address} onChange={set("address")} placeholder="e.g. Table View, Cape Town" /></Field>
-      <Field label="Contractor name"><input style={inputStyle} value={form.contractor} onChange={set("contractor")} placeholder="e.g. Kaizer Electrical CC" /></Field>
+      <Field label="Client / Site name" required><input style={inputStyle} value={form.name} onChange={set("name")} placeholder="e.g. Vermeulen Residence" /></Field>
+      <Field label="Address" required><input style={inputStyle} value={form.address} onChange={set("address")} placeholder="e.g. Table View, Cape Town" /></Field>
+      <Field label="Contractor name" required><input style={inputStyle} value={form.contractor} onChange={set("contractor")} placeholder="e.g. Kaizer Electrical CC" /></Field>
       <Field label="DoL registration no."><input style={inputStyle} value={form.reg_no} onChange={set("reg_no")} placeholder="e.g. DoL 4471" /></Field>
       <Field label="Linked COC reference"><input style={inputStyle} value={form.coc_ref} onChange={set("coc_ref")} placeholder="e.g. COC-2026-01187" /></Field>
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -660,12 +660,12 @@ function EditJobForm({ job, cableCount, onCancel, onSave, onDelete }) {
   });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const canSave = form.name.trim() && form.address.trim();
+  const canSave = form.name.trim() && form.address.trim() && form.contractor.trim();
   return (
     <div style={{ padding: 16 }}>
-      <Field label="Client / Site name"><input style={inputStyle} value={form.name} onChange={set("name")} /></Field>
-      <Field label="Address"><input style={inputStyle} value={form.address} onChange={set("address")} /></Field>
-      <Field label="Contractor name"><input style={inputStyle} value={form.contractor} onChange={set("contractor")} /></Field>
+      <Field label="Client / Site name" required><input style={inputStyle} value={form.name} onChange={set("name")} /></Field>
+      <Field label="Address" required><input style={inputStyle} value={form.address} onChange={set("address")} /></Field>
+      <Field label="Contractor name" required><input style={inputStyle} value={form.contractor} onChange={set("contractor")} /></Field>
       <Field label="DoL registration no."><input style={inputStyle} value={form.reg_no} onChange={set("reg_no")} /></Field>
       <Field label="Linked COC reference"><input style={inputStyle} value={form.coc_ref} onChange={set("coc_ref")} /></Field>
       <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 12 }}>
