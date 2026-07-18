@@ -92,8 +92,10 @@ export default function App({ user }) {
   const [view, setView] = useState("jobs");
   const [editingCable, setEditingCable] = useState(null);
   const [stats, setStats] = useState({ totalJobs: 0, totalCables: 0 });
+  const [team, setTeam] = useState(null);
+  const [teamMembers, setTeamMembers] = useState([]);
 
-  useEffect(() => { loadJobs(); loadStats(); }, []);
+  useEffect(() => { loadJobs(); loadStats(); loadTeam(); }, []);
 
   async function loadJobs() {
     const { data } = await supabase.from("jobs").select("*").order("created_at", { ascending: false });
@@ -106,13 +108,39 @@ export default function App({ user }) {
     setStats({ totalJobs: jobCount || 0, totalCables: cableCount || 0 });
   }
 
+  async function loadTeam() {
+    const { data: profile } = await supabase.from("profiles").select("team_id").eq("id", user.id).single();
+    if (!profile?.team_id) return;
+    const { data: teamData } = await supabase.from("teams").select("*").eq("id", profile.team_id).single();
+    const { data: membersData } = await supabase.from("profiles").select("id, email, contractor_name").eq("team_id", profile.team_id);
+    setTeam(teamData || null);
+    setTeamMembers(membersData || []);
+  }
+
+  async function joinTeam(code) {
+    const { error } = await supabase.rpc("join_team_by_code", { code });
+    if (error) return { error: "That join code doesn't match any team." };
+    await loadTeam();
+    await loadJobs();
+    await loadStats();
+    setActiveJob(null);
+    setCables([]);
+    return { error: null };
+  }
+
+  async function renameTeam(name) {
+    if (!team || !name.trim()) return;
+    const { error } = await supabase.from("teams").update({ name: name.trim() }).eq("id", team.id);
+    if (!error) await loadTeam();
+  }
+
   async function loadCables(jobId) {
     const { data } = await supabase.from("cables").select("*").eq("job_id", jobId).order("created_at");
     setCables(data || []);
   }
 
   async function createJob(job) {
-    const { data, error } = await supabase.from("jobs").insert({ ...job, user_id: user.id }).select().single();
+    const { data, error } = await supabase.from("jobs").insert({ ...job, user_id: user.id, team_id: team?.id }).select().single();
     if (!error) {
       await loadJobs();
       await loadStats();
@@ -123,7 +151,7 @@ export default function App({ user }) {
   }
 
   async function addCable(cable) {
-    const { error } = await supabase.from("cables").insert({ ...cable, job_id: activeJob.id });
+    const { error } = await supabase.from("cables").insert({ ...cable, job_id: activeJob.id, created_by: user.id });
     if (!error) {
       await loadCables(activeJob.id);
       await loadStats();
@@ -227,11 +255,14 @@ export default function App({ user }) {
           onBack={goBack}
           onSignOut={() => supabase.auth.signOut().then(() => window.location.reload())}
         />
-        {(view === "jobs" || view === "howto") && (
-          <TabBar view={view} onJobs={() => setView("jobs")} onHowTo={() => setView("howto")} />
+        {(view === "jobs" || view === "howto" || view === "team") && (
+          <TabBar view={view} onJobs={() => setView("jobs")} onHowTo={() => setView("howto")} onTeam={() => setView("team")} />
         )}
         {view === "howto" && <HowItWorks />}
-        {view === "jobs" && <JobsList jobs={jobs} stats={stats} onOpen={openJob} onNew={() => setView("newjob")} />}
+        {view === "team" && (
+          <TeamView user={user} team={team} teamMembers={teamMembers} onJoinTeam={joinTeam} onRenameTeam={renameTeam} />
+        )}
+        {view === "jobs" && <JobsList jobs={jobs} stats={stats} team={team} onOpen={openJob} onNew={() => setView("newjob")} />}
         {view === "newjob" && <NewJobForm onCancel={() => setView("jobs")} onCreate={createJob} />}
         {view === "job" && activeJob && (
           <JobDetail
@@ -283,25 +314,25 @@ export default function App({ user }) {
 }
 
 function TopBar({ view, activeJob, onBack, onSignOut }) {
-  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "newjob" ? "New Job" : view === "editjob" ? "Edit Job" : view === "floorplan" ? "Floor Plan" : view === "editcable" ? "Edit Cable" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
-  const showBack = view !== "jobs" && view !== "howto";
+  const title = view === "jobs" ? "Tracewire" : view === "howto" ? "How It Works" : view === "team" ? "Team" : view === "newjob" ? "New Job" : view === "editjob" ? "Edit Job" : view === "floorplan" ? "Floor Plan" : view === "editcable" ? "Edit Cable" : view === "scan" ? "Scan Tag" : view === "report" ? "As-Built Report" : activeJob?.name;
+  const isTopLevel = view === "jobs" || view === "howto" || view === "team";
   return (
     <div style={{ background: INK, color: PAPER, padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {showBack && <button onClick={onBack} style={{ background: "none", border: "none", color: PAPER, cursor: "pointer", fontSize: 18 }}>←</button>}
+        {!isTopLevel && <button onClick={onBack} style={{ background: "none", border: "none", color: PAPER, cursor: "pointer", fontSize: 18 }}>←</button>}
         <div>
           <p style={{ fontSize: 10, color: ACCENT, textTransform: "uppercase", letterSpacing: "0.1em", margin: 0, fontFamily: "monospace" }}>
-            {view === "jobs" ? "Cable documentation" : view === "howto" ? "Getting started" : "Job record"}
+            {view === "jobs" ? "Cable documentation" : view === "howto" ? "Getting started" : view === "team" ? "Your crew" : "Job record"}
           </p>
           <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{title}</h1>
         </div>
       </div>
-      {(view === "jobs" || view === "howto") && <button onClick={onSignOut} style={{ background: "none", border: "none", color: SLATE, fontSize: 12, cursor: "pointer" }}>Sign out</button>}
+      {isTopLevel && <button onClick={onSignOut} style={{ background: "none", border: "none", color: SLATE, fontSize: 12, cursor: "pointer" }}>Sign out</button>}
     </div>
   );
 }
 
-function TabBar({ view, onJobs, onHowTo }) {
+function TabBar({ view, onJobs, onHowTo, onTeam }) {
   const tabStyle = (active) => ({
     flex: 1, padding: "10px 0", textAlign: "center", fontSize: 13, fontWeight: 600, cursor: "pointer",
     background: active ? PAPER : PANEL, color: active ? INK : SLATE, border: "none",
@@ -310,6 +341,7 @@ function TabBar({ view, onJobs, onHowTo }) {
   return (
     <div style={{ display: "flex", borderBottom: `1px solid ${LINE}` }}>
       <button style={tabStyle(view === "jobs")} onClick={onJobs}>Jobs</button>
+      <button style={tabStyle(view === "team")} onClick={onTeam}>Team</button>
       <button style={tabStyle(view === "howto")} onClick={onHowTo}>How It Works</button>
     </div>
   );
@@ -324,6 +356,7 @@ function HowItWorks() {
     { title: "5. Mark it on the floor plan", body: "Upload a floor plan once per job, then tap it to drop a pin showing exactly where each cable runs." },
     { title: "6. Generate the report", body: "When the job's done, tap “Generate As-Built Report” for a clean, printable document that supports your COC test report, or export the cable log as a CSV." },
     { title: "7. Stick a QR code on the DB board", body: "From any job, get its QR code and print it onto a sticker for the board. The next electrician can scan it — no login needed — and see the full wiring history instantly." },
+    { title: "8. Bring your team on board", body: "Share your join code from the Team tab so colleagues see the same jobs you do, instead of starting from scratch on their own." },
   ];
   return (
     <div style={{ padding: 16 }}>
@@ -333,6 +366,101 @@ function HowItWorks() {
           <p style={{ fontSize: 13, color: SLATE, margin: 0, lineHeight: 1.5 }}>{s.body}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TeamView({ user, team, teamMembers, onJoinTeam, onRenameTeam }) {
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState("");
+  const [joinSuccess, setJoinSuccess] = useState(false);
+  const [teamName, setTeamName] = useState(team?.name || "");
+  const [savingName, setSavingName] = useState(false);
+
+  const isOwner = team?.owner_id === user.id;
+
+  const handleJoin = async () => {
+    setJoining(true);
+    setJoinError("");
+    setJoinSuccess(false);
+    const { error } = await onJoinTeam(joinCode);
+    setJoining(false);
+    if (error) {
+      setJoinError(error);
+    } else {
+      setJoinSuccess(true);
+      setJoinCode("");
+    }
+  };
+
+  const handleRename = async () => {
+    setSavingName(true);
+    await onRenameTeam(teamName);
+    setSavingName(false);
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      {team && (
+        <>
+          <div style={{ background: PANEL, border: `1px solid ${LINE}`, borderRadius: 6, padding: 14, marginBottom: 16 }}>
+            <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 6 }}>Your Team</p>
+            {isOwner ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                <input style={inputStyle} value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+                <button onClick={handleRename} disabled={savingName} style={{ padding: "0 14px", background: INK, color: PAPER, border: "none", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                  {savingName ? "…" : "Save"}
+                </button>
+              </div>
+            ) : (
+              <p style={{ fontSize: 16, fontWeight: 700, color: INK, margin: 0 }}>{team.name}</p>
+            )}
+          </div>
+
+          <div style={{ background: INK, borderRadius: 6, padding: 14, marginBottom: 16, textAlign: "center" }}>
+            <p style={{ fontSize: 10, fontFamily: "monospace", color: "#B8C0CC", textTransform: "uppercase", marginBottom: 6 }}>Join Code</p>
+            <p style={{ fontSize: 28, fontWeight: 800, color: PAPER, letterSpacing: "0.08em", margin: 0 }}>{team.join_code}</p>
+            <p style={{ fontSize: 11, color: "#B8C0CC", marginTop: 6 }}>Share this with a colleague so they can join your team</p>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 8 }}>
+              Members ({teamMembers.length})
+            </p>
+            {teamMembers.map((m) => (
+              <div key={m.id} style={{ padding: 10, border: `1px solid ${LINE}`, borderRadius: 6, marginBottom: 6 }}>
+                <p style={{ fontSize: 13, color: INK, margin: 0 }}>
+                  {m.email}{m.id === team.owner_id ? " · Owner" : ""}{m.id === user.id ? " (you)" : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 20 }}>
+        <p style={{ fontSize: 11, fontFamily: "monospace", color: SLATE, textTransform: "uppercase", marginBottom: 8 }}>
+          Join a Different Team
+        </p>
+        <p style={{ fontSize: 12, color: SLATE, marginBottom: 10 }}>
+          Enter a colleague's join code to start seeing their jobs instead of your own. You can always switch back with your own code.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            style={{ ...inputStyle, textTransform: "uppercase" }}
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+            placeholder="e.g. A1B2C3"
+            maxLength={6}
+          />
+          <button onClick={handleJoin} disabled={joining || !joinCode.trim()} style={{ padding: "0 16px", background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer", opacity: joinCode.trim() ? 1 : 0.5 }}>
+            {joining ? "…" : "Join"}
+          </button>
+        </div>
+        {joinError && <p style={{ fontSize: 12, color: ACCENT, marginTop: 8 }}>{joinError}</p>}
+        {joinSuccess && <p style={{ fontSize: 12, color: "#2E7D4F", marginTop: 8 }}>Joined! Your jobs list now shows that team's work.</p>}
+      </div>
     </div>
   );
 }
@@ -352,9 +480,14 @@ function StatsCard({ stats }) {
   );
 }
 
-function JobsList({ jobs, stats, onOpen, onNew }) {
+function JobsList({ jobs, stats, team, onOpen, onNew }) {
   return (
     <div style={{ padding: 16 }}>
+      {team && (
+        <p style={{ fontSize: 12, color: SLATE, marginBottom: 10 }}>
+          Viewing: <span style={{ color: INK, fontWeight: 600 }}>{team.name}</span>
+        </p>
+      )}
       <StatsCard stats={stats} />
       <button onClick={onNew} style={{ width: "100%", padding: 12, background: ACCENT, color: PAPER, border: "none", borderRadius: 6, fontWeight: 600, marginBottom: 20, cursor: "pointer" }}>
         + New Job
