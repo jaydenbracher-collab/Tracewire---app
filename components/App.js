@@ -503,10 +503,12 @@ function JobsList({ jobs, stats, team, onOpen, onNew }) {
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, required, children }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "block", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", color: SLATE, marginBottom: 4 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 11, fontFamily: "monospace", textTransform: "uppercase", color: SLATE, marginBottom: 4 }}>
+        {label}{required && <span style={{ color: ACCENT }}> *</span>}
+      </label>
       {children}
     </div>
   );
